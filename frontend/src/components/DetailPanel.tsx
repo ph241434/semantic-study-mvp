@@ -1,4 +1,4 @@
-import { ArrowRight, Maximize2, PenLine, Save, X } from 'lucide-react';
+import { ArrowRight, Maximize2, PenLine, Save, Trash2, X } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 import { api } from '../api/client';
@@ -24,6 +24,7 @@ type Props = {
   concepts: Concept[];
   onConceptSaved: (concept: Concept) => void;
   onRelationshipSaved: (relationship: Relationship) => void;
+  onRelationshipDeleted?: (relationshipId: number) => void;
   onStudyQuestion: (question: Question) => void;
   onExpandConcept: (conceptId: number) => void;
 };
@@ -46,6 +47,7 @@ export function DetailPanel({
   concepts,
   onConceptSaved,
   onRelationshipSaved,
+  onRelationshipDeleted,
   onStudyQuestion,
   onExpandConcept,
 }: Props) {
@@ -60,6 +62,7 @@ export function DetailPanel({
     relationship_type: relationship?.relationship_type ?? 'USES',
     description: relationship?.description ?? '',
   });
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     setEditingConcept(false);
@@ -72,6 +75,7 @@ export function DetailPanel({
 
   useEffect(() => {
     setEditingRelationship(false);
+    setActionError(null);
     setRelationshipDraft({
       relationship_type: relationship?.relationship_type ?? 'USES',
       description: relationship?.description ?? '',
@@ -106,6 +110,18 @@ export function DetailPanel({
     const saved = await api.updateRelationship(relationship.id, relationshipDraft);
     onRelationshipSaved(saved);
     setEditingRelationship(false);
+  }
+
+  async function deleteRelationship() {
+    if (!relationship || !onRelationshipDeleted) return;
+    if (!window.confirm('Delete this relationship?')) return;
+    try {
+      setActionError(null);
+      await api.deleteRelationship(relationship.id);
+      onRelationshipDeleted(relationship.id);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Could not delete relationship');
+    }
   }
 
   if (!concept && !relationship) {
@@ -174,14 +190,27 @@ export function DetailPanel({
                 <span>Next: {formatDate(relationship.next_review_at)}</span>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setEditingRelationship(true)}
-              className="inline-flex h-9 items-center gap-2 rounded-md border border-line px-3 text-sm font-semibold hover:bg-paper"
-            >
-              <PenLine className="h-4 w-4" />
-              Edit
-            </button>
+            {actionError && <p className="text-sm text-rust">{actionError}</p>}
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setEditingRelationship(true)}
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-line px-3 text-sm font-semibold hover:bg-paper"
+              >
+                <PenLine className="h-4 w-4" />
+                Edit
+              </button>
+              {onRelationshipDeleted && (
+                <button
+                  type="button"
+                  onClick={deleteRelationship}
+                  className="inline-flex h-9 items-center gap-2 rounded-md border border-rust/40 px-3 text-sm font-semibold text-rust hover:bg-red-50"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete
+                </button>
+              )}
+            </div>
           </>
         )}
 

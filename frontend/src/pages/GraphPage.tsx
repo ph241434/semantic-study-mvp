@@ -1,12 +1,15 @@
-import { Layers, RefreshCw } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 
 import { api } from '../api/client';
 import { ConceptForm } from '../components/ConceptForm';
 import { DetailPanel } from '../components/DetailPanel';
 import { GraphCanvas } from '../components/GraphCanvas';
+import { GraphToolRail, type GraphDestination } from '../components/GraphToolRail';
 import { RelationshipForm } from '../components/RelationshipForm';
 import { SearchBox } from '../components/SearchBox';
+import { buildGraphLayout, graphLayoutModes, type GraphLayoutMode } from '../graph/layout';
 import type { Concept, GraphResponse, Question, Relationship } from '../types';
 
 type Props = {
@@ -15,11 +18,22 @@ type Props = {
   questions: Question[];
   selectedConceptId: number | null;
   selectedRelationshipId: number | null;
+  catalogLoading?: boolean;
+  catalogError?: string | null;
+  currentView: GraphDestination;
+  onChangeView: (view: GraphDestination) => void;
   onSelectConcept: (conceptId: number) => void;
   onSelectRelationship: (relationshipId: number | null) => void;
   onCatalogChanged: () => Promise<void>;
   onStudyQuestion: (question: Question) => void;
 };
+
+type QuickPanel = 'concept' | 'relationship' | null;
+
+const SIDEBAR_COLLAPSED_KEY = 'semantic-study.graphSidebarCollapsed';
+const GRID_VISIBLE_KEY = 'semantic-study.graphGridVisible';
+const GRAPH_LAYOUT_KEY = 'semantic-study.graphLayoutMode';
+const COMMUNITY_LABELS_KEY = 'semantic-study.communityLabels';
 
 export function GraphPage({
   concepts,
@@ -27,6 +41,10 @@ export function GraphPage({
   questions,
   selectedConceptId,
   selectedRelationshipId,
+  catalogLoading = false,
+  catalogError = null,
+  currentView,
+  onChangeView,
   onSelectConcept,
   onSelectRelationship,
   onCatalogChanged,
@@ -35,11 +53,23 @@ export function GraphPage({
   const [depth, setDepth] = useState(1);
   const [graph, setGraph] = useState<GraphResponse | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+  const [quickPanel, setQuickPanel] = useState<QuickPanel>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useBooleanPreference(SIDEBAR_COLLAPSED_KEY, false);
+  const [showGrid, setShowGrid] = useBooleanPreference(GRID_VISIBLE_KEY, true);
+  const [layoutMode, setLayoutMode] = useLayoutModePreference(GRAPH_LAYOUT_KEY, 'layered');
+  const [communityLabels, setCommunityLabels] = useCommunityLabelPreference(COMMUNITY_LABELS_KEY);
+  const [selectedCommunityId, setSelectedCommunityId] = useState<number | null>(null);
+  const [focusedCommunityId, setFocusedCommunityId] = useState<number | null>(null);
+  const [inspectorOpen, setInspectorOpen] = useState(Boolean(selectedConceptId || selectedRelationshipId));
+  const [viewportRevision, setViewportRevision] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const selectedConcept = concepts.find((concept) => concept.id === selectedConceptId) ?? null;
   const selectedRelationship = relationships.find((relationship) => relationship.id === selectedRelationshipId) ?? null;
+  const detailConcept = selectedRelationship ? null : selectedConcept;
+  const graphLayout = useMemo(() => (graph ? buildGraphLayout(graph, layoutMode) : null), [graph, layoutMode]);
+  const communities = graphLayout?.communities ?? [];
 
   useEffect(() => {
     if (!selectedConceptId) {
@@ -67,103 +97,272 @@ export function GraphPage({
     };
   }, [selectedConceptId, depth, expandedIds]);
 
-  const detailConcept = selectedRelationship ? null : selectedConcept;
+  useEffect(() => {
+    if (selectedConceptId || selectedRelationshipId) {
+      setInspectorOpen(true);
+    }
+  }, [selectedConceptId, selectedRelationshipId]);
+
+  useEffect(() => {
+    if (layoutMode !== 'clustered') {
+      setSelectedCommunityId(null);
+      setFocusedCommunityId(null);
+      return;
+    }
+
+    const hasSelectedCommunity = communities.some((community) => community.id === selectedCommunityId);
+    if (selectedCommunityId && !hasSelectedCommunity) {
+      setSelectedCommunityId(null);
+    }
+
+    const hasFocusedCommunity = communities.some((community) => community.id === focusedCommunityId);
+    if (focusedCommunityId && !hasFocusedCommunity) {
+      setFocusedCommunityId(null);
+    }
+  }, [communities, focusedCommunityId, layoutMode, selectedCommunityId]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (isEditableTarget(event.target)) return;
+      if (event.key === 'Escape') {
+        if (quickPanel) {
+          setQuickPanel(null);
+          return;
+        }
+        if (inspectorOpen) {
+          closeInspector();
+        }
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [inspectorOpen, quickPanel]);
 
   const graphLabel = useMemo(() => {
     if (!selectedConcept) return 'No concept selected';
     return `${selectedConcept.name} + depth ${depth}`;
   }, [depth, selectedConcept]);
 
+  function setSidebarState(collapsed: boolean) {
+    setSidebarCollapsed(collapsed);
+    setViewportRevision((revision) => revision + 1);
+  }
+
+  function selectConceptFromGraph(conceptId: number) {
+    onSelectRelationship(null);
+    onSelectConcept(conceptId);
+    setInspectorOpen(true);
+  }
+
+  function selectRelationshipFromGraph(relationshipId: number) {
+    onSelectRelationship(relationshipId);
+    setInspectorOpen(true);
+  }
+
+  function closeInspector() {
+    setInspectorOpen(false);
+    onSelectRelationship(null);
+  }
+
+  function closeWorkspaceOverlays() {
+    closeInspector();
+    setSelectedCommunityId(null);
+    setFocusedCommunityId(null);
+  }
+
+  async function conceptCreated(concept: Concept) {
+    await onCatalogChanged();
+    onSelectRelationship(null);
+    onSelectConcept(concept.id);
+    setQuickPanel(null);
+    setInspectorOpen(true);
+  }
+
+  async function relationshipCreated(relationship: Relationship) {
+    await onCatalogChanged();
+    onSelectRelationship(relationship.id);
+    onSelectConcept(relationship.source_concept_id);
+    setQuickPanel(null);
+    setInspectorOpen(true);
+  }
+
+  async function relationshipDeleted() {
+    onSelectRelationship(null);
+    setInspectorOpen(false);
+    await onCatalogChanged();
+  }
+
+  function changeDepth(nextDepth: number) {
+    setDepth(nextDepth);
+    setSelectedCommunityId(null);
+    setFocusedCommunityId(null);
+    setViewportRevision((revision) => revision + 1);
+  }
+
+  function changeLayoutMode(nextMode: GraphLayoutMode) {
+    setLayoutMode(nextMode);
+    setSelectedCommunityId(null);
+    setFocusedCommunityId(null);
+    setViewportRevision((revision) => revision + 1);
+  }
+
+  function selectCommunity(communityId: number) {
+    setSelectedCommunityId((current) => (current === communityId ? null : communityId));
+    setFocusedCommunityId(null);
+  }
+
+  function focusCommunity(communityId: number | null) {
+    if (communityId === null) {
+      showAllCommunities();
+      return;
+    }
+    setSelectedCommunityId(communityId);
+    setFocusedCommunityId(communityId);
+  }
+
+  function showAllCommunities() {
+    setSelectedCommunityId(null);
+    setFocusedCommunityId(null);
+    setViewportRevision((revision) => revision + 1);
+  }
+
+  function changeCommunityLabel(stableKey: string, label: string) {
+    setCommunityLabels((current) => {
+      const next = { ...current };
+      if (label.trim()) {
+        next[stableKey] = label;
+      } else {
+        delete next[stableKey];
+      }
+      return next;
+    });
+  }
+
   return (
-    <div className="space-y-4">
-      <section className="grid gap-3 xl:grid-cols-[1fr_1fr]">
-        <ConceptForm
-          onCreated={async (concept) => {
-            await onCatalogChanged();
-            onSelectConcept(concept.id);
-          }}
-        />
-        <RelationshipForm
-          concepts={concepts}
+    <div
+      className={`graph-workspace${sidebarCollapsed ? ' graph-workspace-sidebar-collapsed' : ''}${
+        inspectorOpen ? ' graph-workspace-inspector-open' : ''
+      }`}
+      data-testid="graph-workspace"
+    >
+      <div className="absolute inset-0">
+        <GraphCanvas
+          graph={graph}
+          layout={graphLayout}
+          layoutMode={layoutMode}
           selectedConceptId={selectedConceptId}
-          onCreated={async (relationship) => {
-            await onCatalogChanged();
-            onSelectRelationship(relationship.id);
-            onSelectConcept(relationship.source_concept_id);
-          }}
+          selectedRelationshipId={selectedRelationshipId}
+          selectedCommunityId={selectedCommunityId}
+          focusedCommunityId={focusedCommunityId}
+          communityLabels={communityLabels}
+          variant="workspace"
+          showGrid={showGrid}
+          viewportRevision={viewportRevision}
+          onSelectConcept={selectConceptFromGraph}
+          onSelectRelationship={selectRelationshipFromGraph}
+          onSelectCommunity={selectCommunity}
+          onFocusCommunity={focusCommunity}
+          onPaneClick={closeWorkspaceOverlays}
         />
-      </section>
+      </div>
 
-      <section className="grid min-h-[620px] gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-3">
-          <div className="flex flex-col gap-3 rounded-md border border-line bg-panel p-3 md:flex-row md:items-center md:justify-between">
-            <div className="flex min-w-0 flex-1 items-center gap-3">
-              <Layers className="h-5 w-5 shrink-0 text-teal" />
-              <div className="min-w-0">
-                <p className="truncate text-sm font-bold text-ink">{graphLabel}</p>
-                <p className="text-xs text-ink/55">{graph?.nodes.length ?? 0} nodes in view</p>
-              </div>
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <SearchBox
-                onSelect={(concept) => {
-                  onSelectRelationship(null);
-                  onSelectConcept(concept.id);
-                }}
-              />
-              <select
-                value={depth}
-                onChange={(event) => setDepth(Number(event.target.value))}
-                className="h-10 rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-teal"
-              >
-                <option value={1}>Depth 1</option>
-                <option value={2}>Depth 2</option>
-                <option value={3}>Depth 3</option>
-              </select>
-              <button
-                type="button"
-                onClick={() => selectedConceptId && setExpandedIds(new Set())}
-                className="inline-flex h-10 items-center justify-center rounded-md border border-line px-3 text-sm font-semibold hover:bg-paper"
-                title="Reset expanded nodes"
-              >
-                <RefreshCw className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-
-          {error && <div className="rounded-md border border-rust/30 bg-red-50 p-3 text-sm text-rust">{error}</div>}
-          {loading && <div className="rounded-md border border-line bg-panel p-3 text-sm text-ink/55">Loading graph...</div>}
-          <GraphCanvas
-            graph={graph}
-            selectedConceptId={selectedConceptId}
-            selectedRelationshipId={selectedRelationshipId}
-            onSelectConcept={(conceptId) => {
+      <GraphToolRail
+        collapsed={sidebarCollapsed}
+        depth={depth}
+        layoutMode={layoutMode}
+        graphLabel={graphLabel}
+        nodeCount={graph?.nodes.length ?? 0}
+        loading={catalogLoading || loading}
+        error={catalogError ?? error}
+        showGrid={showGrid}
+        currentView={currentView}
+        communities={communities}
+        selectedCommunityId={selectedCommunityId}
+        focusedCommunityId={focusedCommunityId}
+        communityLabels={communityLabels}
+        search={
+          <SearchBox
+            variant="dark"
+            onSelect={(concept) => {
               onSelectRelationship(null);
-              onSelectConcept(conceptId);
+              onSelectConcept(concept.id);
+              setSelectedCommunityId(null);
+              setFocusedCommunityId(null);
+              setInspectorOpen(true);
+              setViewportRevision((revision) => revision + 1);
             }}
-            onSelectRelationship={onSelectRelationship}
+          />
+        }
+        onCollapsedChange={setSidebarState}
+        onDepthChange={changeDepth}
+        onLayoutModeChange={changeLayoutMode}
+        onGridChange={setShowGrid}
+        onCommunitySelect={selectCommunity}
+        onCommunityFocus={focusCommunity}
+        onShowAllCommunities={showAllCommunities}
+        onCommunityLabelChange={changeCommunityLabel}
+        onOpenConcept={() => setQuickPanel('concept')}
+        onOpenRelationship={() => setQuickPanel('relationship')}
+        onFitGraph={() => setViewportRevision((revision) => revision + 1)}
+        onResetExpanded={() => setExpandedIds(new Set())}
+        onNavigate={onChangeView}
+      />
+
+      {quickPanel && (
+        <FloatingPanel title={quickPanel === 'concept' ? 'Add Concept' : 'Add Relationship'} onClose={() => setQuickPanel(null)}>
+          {quickPanel === 'concept' ? (
+            <ConceptForm onCreated={conceptCreated} />
+          ) : (
+            <RelationshipForm concepts={concepts} selectedConceptId={selectedConceptId} onCreated={relationshipCreated} />
+          )}
+        </FloatingPanel>
+      )}
+
+      {inspectorOpen && (detailConcept || selectedRelationship) && (
+        <div className="graph-inspector-panel" data-testid="graph-inspector">
+          <button type="button" onClick={closeInspector} className="graph-inspector-close" title="Close Inspector">
+            <X className="h-4 w-4" />
+            <span className="sr-only">Close Inspector</span>
+          </button>
+          <DetailPanel
+            concept={detailConcept}
+            relationship={selectedRelationship}
+            relationships={relationships}
+            questions={questions}
+            concepts={concepts}
+            onConceptSaved={async (concept) => {
+              await onCatalogChanged();
+              onSelectConcept(concept.id);
+            }}
+            onRelationshipSaved={async (relationship) => {
+              await onCatalogChanged();
+              onSelectRelationship(relationship.id);
+            }}
+            onRelationshipDeleted={relationshipDeleted}
+            onStudyQuestion={onStudyQuestion}
+            onExpandConcept={(conceptId) => {
+              setExpandedIds((current) => new Set(current).add(conceptId));
+            }}
           />
         </div>
+      )}
+    </div>
+  );
+}
 
-        <DetailPanel
-          concept={detailConcept}
-          relationship={selectedRelationship}
-          relationships={relationships}
-          questions={questions}
-          concepts={concepts}
-          onConceptSaved={async (concept) => {
-            await onCatalogChanged();
-            onSelectConcept(concept.id);
-          }}
-          onRelationshipSaved={async (relationship) => {
-            await onCatalogChanged();
-            onSelectRelationship(relationship.id);
-          }}
-          onStudyQuestion={onStudyQuestion}
-          onExpandConcept={(conceptId) => {
-            setExpandedIds((current) => new Set(current).add(conceptId));
-          }}
-        />
+function FloatingPanel({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+  return (
+    <div className="graph-floating-backdrop" role="presentation">
+      <section className="graph-floating-panel" role="dialog" aria-modal="true" aria-label={title}>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="text-base font-bold text-white">{title}</h2>
+          <button type="button" onClick={onClose} className="graph-icon-button" title="Close">
+            <X className="h-4 w-4" />
+            <span className="sr-only">Close</span>
+          </button>
+        </div>
+        {children}
       </section>
     </div>
   );
@@ -184,3 +383,71 @@ function mergeGraphs(graphs: GraphResponse[], centerId: number, depth: number): 
   };
 }
 
+function useBooleanPreference(key: string, fallback: boolean) {
+  const [value, setValue] = useState(() => readBooleanPreference(key, fallback));
+
+  useEffect(() => {
+    window.localStorage.setItem(key, value ? 'true' : 'false');
+  }, [key, value]);
+
+  return [value, setValue] as const;
+}
+
+function readBooleanPreference(key: string, fallback: boolean) {
+  if (typeof window === 'undefined') return fallback;
+  const stored = window.localStorage.getItem(key);
+  if (stored === 'true') return true;
+  if (stored === 'false') return false;
+  return fallback;
+}
+
+function useLayoutModePreference(key: string, fallback: GraphLayoutMode) {
+  const [value, setValue] = useState(() => readLayoutModePreference(key, fallback));
+
+  useEffect(() => {
+    window.localStorage.setItem(key, value);
+  }, [key, value]);
+
+  return [value, setValue] as const;
+}
+
+function readLayoutModePreference(key: string, fallback: GraphLayoutMode) {
+  if (typeof window === 'undefined') return fallback;
+  const stored = window.localStorage.getItem(key);
+  return graphLayoutModes.includes(stored as GraphLayoutMode) ? (stored as GraphLayoutMode) : fallback;
+}
+
+function useCommunityLabelPreference(key: string) {
+  const [value, setValue] = useState<Record<string, string>>(() => readCommunityLabels(key));
+
+  useEffect(() => {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  }, [key, value]);
+
+  return [value, setValue] as const;
+}
+
+function readCommunityLabels(key: string) {
+  if (typeof window === 'undefined') return {};
+  const stored = window.localStorage.getItem(key);
+  if (!stored) return {};
+  try {
+    const parsed = JSON.parse(stored) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function isEditableTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    target.isContentEditable
+  );
+}

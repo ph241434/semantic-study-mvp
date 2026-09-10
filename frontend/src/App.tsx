@@ -74,8 +74,11 @@ function App() {
     await loadCatalog();
   }
 
+  const graphWorkspaceActive = view === 'graph';
+
   return (
-    <div className="min-h-screen text-ink">
+    <div className={`min-h-screen ${graphWorkspaceActive ? 'bg-[#090b0f] text-white' : 'text-ink'}`}>
+      {!graphWorkspaceActive && (
       <header className="border-b border-line bg-panel/92 backdrop-blur">
         <div className="mx-auto flex max-w-[1500px] flex-col gap-4 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 items-center gap-3">
@@ -120,14 +123,15 @@ function App() {
           </div>
         </div>
       </header>
+      )}
 
-      <main className="mx-auto max-w-[1500px] px-4 py-5">
-        {error && (
+      <main className={graphWorkspaceActive ? 'h-screen w-screen overflow-hidden' : 'mx-auto max-w-[1500px] px-4 py-5'}>
+        {!graphWorkspaceActive && error && (
           <div className="mb-4 rounded-md border border-rust/30 bg-red-50 p-4 text-sm text-rust">
             {error}. Start the FastAPI backend, then refresh.
           </div>
         )}
-        {loading && (
+        {!graphWorkspaceActive && loading && (
           <div className="mb-4 inline-flex items-center gap-2 rounded-md border border-line bg-panel px-3 py-2 text-sm text-ink/60">
             <RefreshCw className="h-4 w-4 animate-spin" />
             Syncing local data
@@ -155,6 +159,10 @@ function App() {
             questions={questions}
             selectedConceptId={selectedConceptId}
             selectedRelationshipId={selectedRelationshipId}
+            catalogLoading={loading}
+            catalogError={error}
+            currentView={view}
+            onChangeView={setView}
             onSelectConcept={setSelectedConceptId}
             onSelectRelationship={setSelectedRelationshipId}
             onCatalogChanged={loadCatalog}

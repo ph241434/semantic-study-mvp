@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@xyflow/react": "12.11.6",
+    "graphology": "^0.26.0",
+    "graphology-communities-louvain": "^2.0.2",
     "lucide-react": "0.560.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"

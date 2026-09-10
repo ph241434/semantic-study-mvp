@@ -56,6 +56,7 @@ export const api = {
       description: string;
     }>,
   ) => request<Relationship>(`/relationships/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteRelationship: (id: number) => request<void>(`/relationships/${id}`, { method: 'DELETE' }),
   graph: (conceptId: number, depth: number) => request<GraphResponse>(`/graph/${conceptId}?depth=${depth}`),
   questions: () => request<Question[]>('/questions'),
   createQuestion: (payload: {

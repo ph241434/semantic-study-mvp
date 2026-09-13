@@ -1,263 +1,289 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { Concept, GraphResponse, Relationship } from '../types';
 import {
   GRAPH_GRID_SIZE,
+  GRAPH_NODE_HEIGHT,
+  GRAPH_NODE_WIDTH,
   buildGraphLayout,
+  chooseConnectionSides,
+  classicPositionStoresEqual,
+  classicRelationshipPath,
   clearGraphLayoutCaches,
-  detectCommunities,
+  distanceMap,
+  ensureClassicPositions,
   generateSyntheticGraph,
   getGraphLayoutCacheStats,
-  lineIntersectsRect,
+  graphLayoutModes,
+  graphStructureSignature,
+  reorganizeClassicPositions,
   routeRelationships,
   snapPoint,
+  toVisualGraphData,
+  updateClassicPosition,
+  type ClassicPositionStore,
+  type Point,
 } from './layout';
 
-describe('graph community detection', () => {
+describe('classic graph data boundary', () => {
   beforeEach(() => {
     clearGraphLayoutCaches();
   });
 
-  it('detects multiple obvious communities with Louvain', () => {
-    const graph = graphOf(8, [
-      [1, 1, 2],
-      [2, 1, 3],
-      [3, 1, 4],
-      [4, 2, 3],
-      [5, 2, 4],
-      [6, 3, 4],
-      [7, 5, 6],
-      [8, 5, 7],
-      [9, 5, 8],
-      [10, 6, 7],
-      [11, 6, 8],
-      [12, 7, 8],
-      [13, 4, 5],
-    ]);
-
-    const result = detectCommunities(graph, 'computer-science');
-    const firstClusterId = result.nodeCommunity.get(1);
-    const secondClusterId = result.nodeCommunity.get(5);
-
-    expect(result.communities.length).toBeGreaterThanOrEqual(2);
-    expect([2, 3, 4].map((nodeId) => result.nodeCommunity.get(nodeId))).toEqual([
-      firstClusterId,
-      firstClusterId,
-      firstClusterId,
-    ]);
-    expect([6, 7, 8].map((nodeId) => result.nodeCommunity.get(nodeId))).toEqual([
-      secondClusterId,
-      secondClusterId,
-      secondClusterId,
-    ]);
-    expect(firstClusterId).not.toBe(secondClusterId);
-  });
-
-  it('keeps disconnected components separate', () => {
-    const graph = graphOf(4, [
-      [1, 1, 2],
-      [2, 3, 4],
-    ]);
-
-    const result = detectCommunities(graph);
-
-    expect(result.communities).toHaveLength(2);
-    expect(result.nodeCommunity.get(1)).toBe(result.nodeCommunity.get(2));
-    expect(result.nodeCommunity.get(3)).toBe(result.nodeCommunity.get(4));
-    expect(result.nodeCommunity.get(1)).not.toBe(result.nodeCommunity.get(3));
-  });
-
-  it('handles a one-node graph', () => {
-    const graph = graphOf(1, []);
-
-    const result = detectCommunities(graph);
-
-    expect(result.communities).toHaveLength(1);
-    expect(result.communities[0].nodeIds).toEqual([1]);
-  });
-
-  it('uses the provided graph scope and historical graph structure only', () => {
-    const spaceGraph = graphOf(3, [
-      [1, 1, 2],
-      [2, 2, 3],
-    ]);
-    const historicalGraph = graphOf(3, [[1, 1, 2]]);
-
-    const scoped = detectCommunities(spaceGraph, 'space:computer-science');
-    const historical = detectCommunities(historicalGraph, 'space:computer-science:as-of-early');
-
-    expect(scoped.signature).toContain('space:computer-science');
-    expect(historical.signature).toContain('space:computer-science:as-of-early');
-    expect(scoped.signature).not.toEqual(historical.signature);
-    expect(scoped.communities.flatMap((community) => community.nodeIds).sort()).toEqual([1, 2, 3]);
-    expect(historical.communities.flatMap((community) => community.nodeIds).sort()).toEqual([1, 2, 3]);
-  });
-
-  it('caches stable inputs and invalidates when relationships are added or deleted', () => {
-    const baseGraph = graphOf(4, [
-      [1, 1, 2],
-      [2, 3, 4],
-    ]);
-    const addedRelationship = {
-      ...baseGraph,
-      relationships: [...baseGraph.relationships, relationship(3, 2, 3)],
-    };
-    const deletedRelationship = {
-      ...baseGraph,
-      relationships: [baseGraph.relationships[0]],
+  it('projects semantic graph data into visual nodes and visible edges', () => {
+    const graph: GraphResponse = {
+      ...graphOf(2, [[10, 1, 2, 'USES']]),
+      relationships: [relationship(10, 1, 2, 'USES'), relationship(11, 1, 99, 'REQUIRES')],
     };
 
-    detectCommunities(baseGraph);
-    detectCommunities(baseGraph);
-    expect(getGraphLayoutCacheStats().communityComputations).toBe(1);
+    const visual = toVisualGraphData(graph);
 
-    detectCommunities(addedRelationship);
-    expect(getGraphLayoutCacheStats().communityComputations).toBe(2);
-
-    detectCommunities(deletedRelationship);
-    expect(getGraphLayoutCacheStats().communityComputations).toBe(3);
-  });
-});
-
-describe('graph routing and grid helpers', () => {
-  beforeEach(() => {
-    clearGraphLayoutCaches();
-  });
-
-  it('gives parallel relationships separate lanes', () => {
-    const routes = routeRelationships(
-      [relationship(1, 1, 2, 'USES'), relationship(2, 1, 2, 'REQUIRES')],
-      new Map([
-        [1, { x: 0, y: 0 }],
-        [2, { x: 288, y: 0 }],
-      ]),
-    );
-
-    expect(new Set(routes.map((route) => route.laneOffset)).size).toBe(2);
-  });
-
-  it('keeps opposite-direction relationships distinct', () => {
-    const routes = routeRelationships(
-      [relationship(1, 1, 2, 'USES'), relationship(2, 2, 1, 'USES')],
-      new Map([
-        [1, { x: 0, y: 0 }],
-        [2, { x: 288, y: 0 }],
-      ]),
-    );
-
-    expect(routes[0].laneOffset).not.toBe(routes[1].laneOffset);
-    expect(routes[0].sourceSide).toBe('right');
-    expect(routes[1].sourceSide).toBe('left');
-  });
-
-  it('detects node-body intersections and offsets obstructed routes', () => {
-    expect(lineIntersectsRect({ x: 0, y: 40 }, { x: 360, y: 40 }, { x: 150, y: 0, width: 80, height: 80 })).toBe(true);
-    expect(lineIntersectsRect({ x: 0, y: 120 }, { x: 360, y: 120 }, { x: 150, y: 0, width: 80, height: 80 })).toBe(false);
-
-    const routes = routeRelationships(
-      [relationship(1, 1, 3, 'USES')],
-      new Map([
-        [1, { x: 0, y: 0 }],
-        [2, { x: 240, y: 0 }],
-        [3, { x: 480, y: 0 }],
-      ]),
-    );
-
-    expect(routes[0].obstacleCount).toBe(1);
-    expect(routes[0].laneOffset).not.toBe(0);
-  });
-
-  it('routes deterministically for identical inputs', () => {
-    const relationships = [relationship(1, 1, 2, 'USES'), relationship(2, 2, 1, 'REQUIRES')];
-    const positions = new Map([
-      [1, { x: 0, y: 0 }],
-      [2, { x: 288, y: 0 }],
-    ]);
-
-    expect(routeRelationships(relationships, positions)).toEqual(routeRelationships(relationships, positions));
-  });
-
-  it('snaps points and automatic layout positions to the graph grid', () => {
-    expect(snapPoint({ x: 25, y: 35 }, 24)).toEqual({ x: 24, y: 24 });
-
-    const layout = buildGraphLayout(graphOf(5, [[1, 1, 2], [2, 2, 3], [3, 4, 5]]), 'clustered');
-
-    layout.nodes.forEach((node) => {
-      expect(Math.abs(node.position.x % GRAPH_GRID_SIZE)).toBe(0);
-      expect(Math.abs(node.position.y % GRAPH_GRID_SIZE)).toBe(0);
+    expect(visual.nodes.map((node) => node.conceptId)).toEqual([1, 2]);
+    expect(visual.nodes[0]).toMatchObject({
+      id: '1',
+      label: 'Concept 1',
+      conceptType: 'algorithm',
+      mastery: 0.5,
+    });
+    expect(visual.edges.map((edge) => edge.relationshipId)).toEqual([10]);
+    expect(visual.edges[0]).toMatchObject({
+      source: '1',
+      target: '2',
+      label: 'USES',
     });
   });
 
-  it('keeps clustered nodes from overlapping after snapping', () => {
-    const layout = buildGraphLayout(
-      graphOf(6, [
-        [1, 1, 2],
-        [2, 1, 3],
-        [3, 2, 3],
-        [4, 4, 5],
-        [5, 5, 6],
-        [6, 4, 6],
-      ]),
-      'clustered',
-    );
+  it('exposes only the Classic layout mode for the rewrite stop point', () => {
+    expect(graphLayoutModes).toEqual(['classic']);
+  });
 
-    layout.nodes.forEach((left, leftIndex) => {
-      layout.nodes.slice(leftIndex + 1).forEach((right) => {
-        const separated =
-          Math.abs(left.position.x - right.position.x) >= 176 || Math.abs(left.position.y - right.position.y) >= 68;
-        expect(separated).toBe(true);
-      });
+  it('keeps graph signatures scoped to semantic graph structure, not saved coordinates', () => {
+    const graph = graphOf(2, [[10, 1, 2, 'USES']]);
+    const signature = graphStructureSignature(graph, 'space:current');
+
+    expect(signature).toContain('space:current');
+    expect(signature).toContain('1>2:USES');
+    expect(signature).not.toContain('240');
+  });
+});
+
+describe('classic position model', () => {
+  beforeEach(() => {
+    clearGraphLayoutCaches();
+  });
+
+  it('uses valid saved positions and creates only missing positions', () => {
+    const graph = graphOf(3, [
+      [10, 1, 2, 'USES'],
+      [11, 1, 3, 'REQUIRES'],
+    ]);
+    const saved = {
+      '1': { x: -96, y: -24 },
+      '2': { x: 264, y: -24 },
+    };
+
+    const ensured = ensureClassicPositions(graph, saved);
+
+    expect(ensured.addedConceptIds).toEqual([3]);
+    expect(ensured.positions['1']).toEqual(saved['1']);
+    expect(ensured.positions['2']).toEqual(saved['2']);
+    expect(ensured.positions['3']).toBeDefined();
+    expect(noOverlaps(Object.values(ensured.positions))).toBe(true);
+  });
+
+  it('does not move existing nodes when a new concept enters the visible graph', () => {
+    const saved = {
+      '1': { x: -96, y: -24 },
+      '2': { x: 264, y: -24 },
+    };
+    const expandedGraph = graphOf(3, [
+      [10, 1, 2, 'USES'],
+      [11, 2, 3, 'REQUIRES'],
+    ]);
+
+    const ensured = ensureClassicPositions(expandedGraph, saved).positions;
+
+    expect(ensured['1']).toEqual(saved['1']);
+    expect(ensured['2']).toEqual(saved['2']);
+    expect(ensured['3']).toBeDefined();
+  });
+
+  it('updates one manual coordinate without changing semantic graph data', () => {
+    const before: ClassicPositionStore = {
+      '1': { x: -96, y: -24 },
+      '2': { x: 264, y: -24 },
+    };
+
+    const after = updateClassicPosition(before, 2, { x: 115, y: 119 });
+
+    expect(after['1']).toEqual(before['1']);
+    expect(after['2']).toEqual({ x: 120, y: 120 });
+    expect(before['2']).toEqual({ x: 264, y: -24 });
+  });
+
+  it('does not automatically move saved Classic positions when mastery changes', () => {
+    const graph = graphOf(2, [[10, 1, 2, 'USES']]);
+    const saved = {
+      '1': { x: -96, y: -24 },
+      '2': { x: 264, y: -24 },
+    };
+    const changedMastery = {
+      ...graph,
+      nodes: graph.nodes.map((node) => ({ ...node, mastery_score: node.mastery_score + 0.1 })),
+    };
+
+    const before = buildGraphLayout(graph, 'classic', { positions: saved });
+    const after = buildGraphLayout(changedMastery, 'classic', { positions: saved });
+
+    expect(positionById(before, 1)).toEqual(saved['1']);
+    expect(positionById(after, 1)).toEqual(saved['1']);
+    expect(positionById(after, 2)).toEqual(saved['2']);
+  });
+
+  it('compares Classic position stores by coordinate value', () => {
+    expect(
+      classicPositionStoresEqual(
+        { '1': { x: 0, y: 0 }, '2': { x: 24, y: 48 } },
+        { '2': { x: 24, y: 48 }, '1': { x: 0, y: 0 } },
+      ),
+    ).toBe(true);
+    expect(classicPositionStoresEqual({ '1': { x: 0, y: 0 } }, { '1': { x: 24, y: 0 } })).toBe(false);
+  });
+
+  it('reorganizes deterministically and avoids obvious node overlap', () => {
+    const graph = graphOf(12, [
+      [1, 1, 2, 'USES'],
+      [2, 1, 3, 'USES'],
+      [3, 1, 4, 'USES'],
+      [4, 2, 5, 'REQUIRES'],
+      [5, 2, 6, 'REQUIRES'],
+      [6, 3, 7, 'PART_OF'],
+      [7, 3, 8, 'PART_OF'],
+      [8, 4, 9, 'CAUSES'],
+      [9, 4, 10, 'CAUSES'],
+      [10, 7, 11, 'SUPPORTS'],
+      [11, 8, 12, 'SUPPORTS'],
+    ]);
+
+    const first = reorganizeClassicPositions(graph);
+    const second = reorganizeClassicPositions(graph);
+
+    expect(first).toEqual(second);
+    expect(noOverlaps(Object.values(first))).toBe(true);
+    Object.values(first).forEach((position) => {
+      expect(Math.abs(position.x % GRAPH_GRID_SIZE)).toBe(0);
+      expect(Math.abs(position.y % GRAPH_GRID_SIZE)).toBe(0);
     });
   });
 });
 
-describe('graph layout caching and larger graphs', () => {
+describe('classic relationship routing', () => {
   beforeEach(() => {
     clearGraphLayoutCaches();
   });
 
-  it('does not recompute layout or communities for stable graph inputs', () => {
-    const graph = graphOf(8, [
-      [1, 1, 2],
-      [2, 2, 3],
-      [3, 3, 4],
-      [4, 5, 6],
-      [5, 6, 7],
-      [6, 7, 8],
-    ]);
-
-    buildGraphLayout(graph, 'clustered');
-    buildGraphLayout(graph, 'clustered');
-
-    expect(getGraphLayoutCacheStats().layoutComputations).toBe(1);
-    expect(getGraphLayoutCacheStats().communityComputations).toBe(1);
+  it('chooses connection sides from relative node positions', () => {
+    expect(chooseConnectionSides({ x: 0, y: 0 }, { x: 280, y: 0 })).toEqual({
+      sourceSide: 'right',
+      targetSide: 'left',
+    });
+    expect(chooseConnectionSides({ x: 0, y: 0 }, { x: 0, y: 240 })).toEqual({
+      sourceSide: 'bottom',
+      targetSide: 'top',
+    });
   });
 
-  it('handles synthetic 100-node, 300-node, and 500-node graphs without changing counts', () => {
+  it('separates multiple same-pair relationships with deterministic curve offsets', () => {
+    const routes = routeRelationships(
+      [relationship(1, 1, 2, 'USES'), relationship(2, 1, 2, 'REQUIRES'), relationship(3, 1, 2, 'SUPPORTS')],
+      new Map([
+        [1, { x: 0, y: 0 }],
+        [2, { x: 280, y: 0 }],
+      ]),
+    );
+
+    expect(routes.map((route) => route.curveOffset)).toEqual([-42, 0, 42]);
+    expect(routes.every((route) => route.parallelCount === 3)).toBe(true);
+  });
+
+  it('separates bidirectional relationships and keeps direction sides obvious', () => {
+    const routes = routeRelationships(
+      [relationship(1, 1, 2, 'USES'), relationship(2, 2, 1, 'REQUIRES')],
+      new Map([
+        [1, { x: 0, y: 0 }],
+        [2, { x: 280, y: 0 }],
+      ]),
+    );
+
+    expect(routes.map((route) => route.curveOffset)).toEqual([-21, 21]);
+    expect(routes.every((route) => route.bidirectional)).toBe(true);
+    expect(routes[0]).toMatchObject({ sourceSide: 'right', targetSide: 'left' });
+    expect(routes[1]).toMatchObject({ sourceSide: 'left', targetSide: 'right' });
+  });
+
+  it('keeps relationship labels tied to their own edge path', () => {
+    const left = classicRelationshipPath({ x: 0, y: 0 }, { x: 280, y: 0 }, -42);
+    const right = classicRelationshipPath({ x: 0, y: 0 }, { x: 280, y: 0 }, 42);
+
+    expect(left.path).not.toEqual(right.path);
+    expect(left.labelY).not.toBe(right.labelY);
+  });
+});
+
+describe('classic graph scale and layout work', () => {
+  beforeEach(() => {
+    clearGraphLayoutCaches();
+  });
+
+  it('computes BFS distances for visible graph depth without storing them', () => {
+    const distances = distanceMap(1, [
+      relationship(1, 1, 2),
+      relationship(2, 2, 3),
+      relationship(3, 4, 5),
+    ]);
+
+    expect(distances.get(1)).toBe(0);
+    expect(distances.get(2)).toBe(1);
+    expect(distances.get(3)).toBe(2);
+    expect(distances.has(4)).toBe(false);
+  });
+
+  it('handles synthetic 100-node, 300-node, and 500-node Classic graphs without changing counts', () => {
     const oneHundred = generateSyntheticGraph(100, 200);
     const threeHundred = generateSyntheticGraph(300, 600);
     const fiveHundred = generateSyntheticGraph(500, 1000);
 
-    const clustered = buildGraphLayout(oneHundred, 'clustered');
-    const classic = buildGraphLayout(threeHundred, 'classic');
-    const largerClustered = buildGraphLayout(fiveHundred, 'clustered');
+    const smallLayout = buildGraphLayout(oneHundred, 'classic');
+    const mediumLayout = buildGraphLayout(threeHundred, 'classic');
+    const largeLayout = buildGraphLayout(fiveHundred, 'classic');
 
-    expect(clustered.nodes).toHaveLength(100);
-    expect(clustered.relationships).toHaveLength(200);
-    expect(classic.nodes).toHaveLength(300);
-    expect(classic.relationships).toHaveLength(600);
-    expect(largerClustered.nodes).toHaveLength(500);
-    expect(largerClustered.relationships).toHaveLength(1000);
-    expect(largerClustered.communities.length).toBeGreaterThan(0);
+    expect(smallLayout.nodes).toHaveLength(100);
+    expect(smallLayout.relationships).toHaveLength(200);
+    expect(mediumLayout.nodes).toHaveLength(300);
+    expect(mediumLayout.relationships).toHaveLength(600);
+    expect(largeLayout.nodes).toHaveLength(500);
+    expect(largeLayout.relationships).toHaveLength(1000);
+    expect(largeLayout.communities).toEqual([]);
+    largeLayout.nodes.forEach((node) => {
+      expect(Number.isFinite(node.position.x)).toBe(true);
+      expect(Number.isFinite(node.position.y)).toBe(true);
+    });
+  });
+
+  it('does not run community work in the active Classic path', () => {
+    buildGraphLayout(graphOf(5, [[1, 1, 2, 'USES']]), 'classic');
+
+    expect(getGraphLayoutCacheStats().communityComputations).toBe(0);
+    expect(getGraphLayoutCacheStats().communityEntries).toBe(0);
   });
 });
 
-function graphOf(nodeCount: number, edges: Array<[number, number, number]>): GraphResponse {
+function graphOf(nodeCount: number, edges: Array<[number, number, number, string?]>): GraphResponse {
   return {
     center_id: 1,
     depth: 3,
     nodes: Array.from({ length: nodeCount }, (_, index) => concept(index + 1)),
-    relationships: edges.map(([id, source, target]) => relationship(id, source, target)),
+    relationships: edges.map(([id, source, target, type]) => relationship(id, source, target, type)),
   };
 }
 
@@ -294,4 +320,19 @@ function relationship(id: number, sourceId: number, targetId: number, type = 'US
     source_name: `Concept ${sourceId}`,
     target_name: `Concept ${targetId}`,
   };
+}
+
+function positionById(layout: ReturnType<typeof buildGraphLayout>, conceptId: number) {
+  return layout.nodes.find((node) => node.conceptId === conceptId)?.position;
+}
+
+function noOverlaps(positions: Point[]) {
+  return positions.every((left, leftIndex) =>
+    positions.slice(leftIndex + 1).every((right) => {
+      const separated =
+        Math.abs(left.x - right.x) >= GRAPH_NODE_WIDTH + 48 ||
+        Math.abs(left.y - right.y) >= GRAPH_NODE_HEIGHT + 48;
+      return separated;
+    }),
+  );
 }

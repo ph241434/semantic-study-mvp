@@ -1,89 +1,78 @@
-import { UndirectedGraph } from 'graphology';
-import louvain from 'graphology-communities-louvain';
-
 import type { Concept, GraphResponse, Relationship } from '../types';
 
 export const GRAPH_GRID_SIZE = 24;
 export const GRAPH_NODE_WIDTH = 176;
 export const GRAPH_NODE_HEIGHT = 68;
+export const CLASSIC_LAYOUT_STORAGE_KEY = 'semantic-study.classicPositions.v1';
 
-const COMMUNITY_PADDING = 74;
-const CLASSIC_EDGE_LENGTH = 250;
+const CLASSIC_NODE_GAP_X = GRAPH_NODE_WIDTH + 104;
+const CLASSIC_NODE_GAP_Y = GRAPH_NODE_HEIGHT + 112;
+const CLASSIC_RING_SPACING = 280;
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
-export const graphLayoutModes = ['layered', 'classic', 'clustered'] as const;
+export const graphLayoutModes = ['classic'] as const;
 export type GraphLayoutMode = (typeof graphLayoutModes)[number];
 
 export const graphLayoutLabels: Record<GraphLayoutMode, string> = {
-  layered: 'Layered',
   classic: 'Classic',
-  clustered: 'Clustered',
 };
-
-export const relationshipCommunityWeights = {
-  DEFAULT: 1,
-  REQUIRES: 1,
-  PART_OF: 1,
-  IS_A: 1,
-  USES: 1,
-  CONTRASTS_WITH: 1,
-  EXAMPLE_OF: 1,
-  CAUSES: 1,
-  IMPLIES: 1,
-  SOLVES: 1,
-  DERIVED_FROM: 1,
-  IMPLEMENTED_BY: 1,
-  PRODUCES: 1,
-  DEPENDS_ON: 1,
-  SUPPORTS: 1,
-} as const satisfies Record<string, number>;
 
 export type Point = {
   x: number;
   y: number;
 };
 
-export type Bounds = Point & {
-  width: number;
-  height: number;
-};
-
 export type PortSide = 'top' | 'right' | 'bottom' | 'left';
 
-export type DetectedCommunity = {
+export type ClassicPositionStore = Record<string, Point>;
+
+export type SemanticGraphNode = {
+  id: string;
+  conceptId: number;
+  label: string;
+  conceptType: Concept['concept_type'];
+  mastery: number;
+  confidence: number;
+  concept: Concept;
+};
+
+export type SemanticGraphEdge = {
+  id: string;
+  relationshipId: number;
+  source: string;
+  target: string;
+  relationshipType: string;
+  label: string;
+  mastery: number;
+  confidence: number;
+  relationship: Relationship;
+};
+
+export type VisualGraphData = {
+  nodes: SemanticGraphNode[];
+  edges: SemanticGraphEdge[];
+};
+
+export type LayoutNode = SemanticGraphNode & {
+  position: Point;
+};
+
+export type RoutedRelationship = SemanticGraphEdge & {
+  sourceSide: PortSide;
+  targetSide: PortSide;
+  parallelIndex: number;
+  parallelCount: number;
+  curveOffset: number;
+  bidirectional: boolean;
+};
+
+export type LayoutCommunity = {
   id: number;
   stableKey: string;
   label: string;
   nodeIds: number[];
   internalRelationshipCount: number;
-};
-
-export type CommunityDetectionResult = {
-  communities: DetectedCommunity[];
-  nodeCommunity: Map<number, number>;
-  signature: string;
-};
-
-export type LayoutNode = {
-  concept: Concept;
-  position: Point;
-  communityId: number | null;
-};
-
-export type RoutedRelationship = {
-  relationship: Relationship;
-  lane: number;
-  laneOffset: number;
-  sourceSide: PortSide;
-  targetSide: PortSide;
-  sourceCommunityId: number | null;
-  targetCommunityId: number | null;
-  isCrossCommunity: boolean;
-  obstacleCount: number;
-};
-
-export type LayoutCommunity = DetectedCommunity & {
-  bounds: Bounds;
+  bounds: { x: number; y: number; width: number; height: number };
   center: Point;
 };
 
@@ -96,42 +85,43 @@ export type GraphLayoutResult = {
   communities: LayoutCommunity[];
 };
 
+type BuildGraphLayoutOptions = {
+  positions?: ClassicPositionStore;
+  scopeKey?: string;
+};
+
 type CacheStats = {
-  communityComputations: number;
   layoutComputations: number;
+  routeComputations: number;
+  initialPlacementComputations: number;
+  reorganizeComputations: number;
+  communityComputations: number;
   communityEntries: number;
   layoutEntries: number;
 };
 
-const communityCache = new Map<string, CommunityDetectionResult>();
-const layoutCache = new Map<string, GraphLayoutResult>();
 const cacheStats: CacheStats = {
-  communityComputations: 0,
   layoutComputations: 0,
+  routeComputations: 0,
+  initialPlacementComputations: 0,
+  reorganizeComputations: 0,
+  communityComputations: 0,
   communityEntries: 0,
   layoutEntries: 0,
 };
 
-export function relationshipCommunityWeight(relationshipType: string) {
-  const key = relationshipType.trim().toUpperCase();
-  return relationshipCommunityWeights[key as keyof typeof relationshipCommunityWeights] ?? relationshipCommunityWeights.DEFAULT;
-}
-
 export function clearGraphLayoutCaches() {
-  communityCache.clear();
-  layoutCache.clear();
-  cacheStats.communityComputations = 0;
   cacheStats.layoutComputations = 0;
+  cacheStats.routeComputations = 0;
+  cacheStats.initialPlacementComputations = 0;
+  cacheStats.reorganizeComputations = 0;
+  cacheStats.communityComputations = 0;
   cacheStats.communityEntries = 0;
   cacheStats.layoutEntries = 0;
 }
 
 export function getGraphLayoutCacheStats(): CacheStats {
-  return {
-    ...cacheStats,
-    communityEntries: communityCache.size,
-    layoutEntries: layoutCache.size,
-  };
+  return { ...cacheStats };
 }
 
 export function graphStructureSignature(graph: GraphResponse, scopeKey = 'current') {
@@ -147,134 +137,283 @@ export function graphStructureSignature(graph: GraphResponse, scopeKey = 'curren
   return `${scopeKey}|center:${graph.center_id}|depth:${graph.depth}|nodes:${nodes.join(',')}|relationships:${relationships.join(',')}`;
 }
 
-export function detectCommunities(graph: GraphResponse, scopeKey = 'current'): CommunityDetectionResult {
-  const signature = graphStructureSignature(graph, scopeKey);
-  const cached = communityCache.get(signature);
-  if (cached) return cached;
+export function toVisualGraphData(graph: GraphResponse): VisualGraphData {
+  const visibleIds = new Set(graph.nodes.map((node) => node.id));
+  const nodes = graph.nodes
+    .slice()
+    .sort((left, right) => left.id - right.id)
+    .map((concept) => ({
+      id: String(concept.id),
+      conceptId: concept.id,
+      label: concept.name,
+      conceptType: concept.concept_type,
+      mastery: concept.mastery_score,
+      confidence: concept.confidence,
+      concept,
+    }));
 
-  cacheStats.communityComputations += 1;
-
-  const sortedNodeIds = graph.nodes.map((node) => node.id).sort((left, right) => left - right);
-  const knownNodeIds = new Set(sortedNodeIds);
-  const adjacency = buildAdjacencyMap(sortedNodeIds, graph.relationships);
-  const detectionGraph = new UndirectedGraph<Record<string, never>, { weight: number }>();
-
-  sortedNodeIds.forEach((nodeId) => {
-    detectionGraph.addNode(String(nodeId), {});
-  });
-
-  const edgeWeights = new Map<string, { source: number; target: number; weight: number }>();
-  graph.relationships
+  const edges = graph.relationships
     .filter(
       (relationship) =>
-        relationship.source_concept_id !== relationship.target_concept_id &&
-        knownNodeIds.has(relationship.source_concept_id) &&
-        knownNodeIds.has(relationship.target_concept_id),
+        visibleIds.has(relationship.source_concept_id) && visibleIds.has(relationship.target_concept_id),
     )
+    .slice()
     .sort((left, right) => left.id - right.id)
-    .forEach((relationship) => {
-      const source = Math.min(relationship.source_concept_id, relationship.target_concept_id);
-      const target = Math.max(relationship.source_concept_id, relationship.target_concept_id);
-      const key = `${source}:${target}`;
-      const current = edgeWeights.get(key) ?? { source, target, weight: 0 };
-      current.weight += relationshipCommunityWeight(relationship.relationship_type);
-      edgeWeights.set(key, current);
-    });
+    .map((relationship) => ({
+      id: String(relationship.id),
+      relationshipId: relationship.id,
+      source: String(relationship.source_concept_id),
+      target: String(relationship.target_concept_id),
+      relationshipType: relationship.relationship_type,
+      label: relationship.relationship_type,
+      mastery: relationship.mastery_score,
+      confidence: relationship.confidence,
+      relationship,
+    }));
 
-  Array.from(edgeWeights.entries())
-    .sort(([left], [right]) => left.localeCompare(right))
-    .forEach(([key, edge]) => {
-      detectionGraph.addUndirectedEdgeWithKey(key, String(edge.source), String(edge.target), { weight: edge.weight });
-    });
-
-  const rawMapping =
-    sortedNodeIds.length <= 1
-      ? Object.fromEntries(sortedNodeIds.map((nodeId, index) => [String(nodeId), index]))
-      : louvain(detectionGraph, {
-          getEdgeWeight: 'weight',
-          randomWalk: false,
-          rng: createStableRng(signature),
-          resolution: 1,
-        });
-
-  const rawGroups = new Map<number, number[]>();
-  sortedNodeIds.forEach((nodeId, fallbackCommunity) => {
-    const communityId = rawMapping[String(nodeId)] ?? fallbackCommunity;
-    rawGroups.set(communityId, [...(rawGroups.get(communityId) ?? []), nodeId]);
-  });
-
-  const splitGroups = Array.from(rawGroups.values()).flatMap((group) => splitDisconnectedCommunity(group, adjacency));
-  const sortedGroups = splitGroups
-    .map((group) => group.slice().sort((left, right) => left - right))
-    .sort((left, right) => (left[0] ?? 0) - (right[0] ?? 0));
-
-  const nodeCommunity = new Map<number, number>();
-  const communities = sortedGroups.map((nodeIds, index) => {
-    const id = index + 1;
-    nodeIds.forEach((nodeId) => nodeCommunity.set(nodeId, id));
-    return {
-      id,
-      stableKey: nodeIds.join('.'),
-      label: `Community ${id}`,
-      nodeIds,
-      internalRelationshipCount: countInternalRelationships(nodeIds, graph.relationships),
-    };
-  });
-
-  const result: CommunityDetectionResult = {
-    communities,
-    nodeCommunity,
-    signature,
-  };
-  communityCache.set(signature, result);
-  return result;
+  return { nodes, edges };
 }
 
 export function buildGraphLayout(
   graph: GraphResponse,
-  mode: GraphLayoutMode,
-  scopeKey = 'current',
+  mode: GraphLayoutMode = 'classic',
+  options: BuildGraphLayoutOptions = {},
 ): GraphLayoutResult {
-  const signature = `${mode}|${graphStructureSignature(graph, scopeKey)}`;
-  const cached = layoutCache.get(signature);
-  if (cached) return cached;
+  if (mode !== 'classic') {
+    throw new Error(`Unsupported graph layout mode: ${mode}`);
+  }
 
   cacheStats.layoutComputations += 1;
 
-  const communityResult = mode === 'clustered' ? detectCommunities(graph, scopeKey) : null;
-  const positions =
-    mode === 'clustered'
-      ? clusteredPositions(graph, communityResult!)
-      : mode === 'classic'
-        ? classicPositions(graph)
-        : layeredPositions(graph);
-  const nodeCommunity = communityResult?.nodeCommunity ?? new Map<number, number>();
-  const routedRelationships = routeRelationships(graph.relationships, positions, nodeCommunity);
-  const layoutCommunities =
-    communityResult?.communities.map((community) => ({
-      ...community,
-      bounds: boundsForNodeIds(community.nodeIds, positions),
-      center: centerOfBounds(boundsForNodeIds(community.nodeIds, positions)),
-    })) ?? [];
+  const visualGraph = toVisualGraphData(graph);
+  const ensured = ensureClassicPositions(graph, options.positions ?? {});
+  const positionMap = positionStoreToMap(ensured.positions);
+  const routes = routeRelationships(
+    visualGraph.edges.map((edge) => edge.relationship),
+    positionMap,
+  );
 
-  const result: GraphLayoutResult = {
-    mode,
-    signature,
+  return {
+    mode: 'classic',
+    signature: graphStructureSignature(graph, options.scopeKey),
     gridSize: GRAPH_GRID_SIZE,
-    nodes: graph.nodes
-      .slice()
-      .sort((left, right) => left.id - right.id)
-      .map((concept) => ({
-        concept,
-        position: positions.get(concept.id) ?? snapPoint({ x: 0, y: 0 }),
-        communityId: nodeCommunity.get(concept.id) ?? null,
-      })),
-    relationships: routedRelationships,
-    communities: layoutCommunities,
+    nodes: visualGraph.nodes.map((node) => ({
+      ...node,
+      position: positionMap.get(node.conceptId) ?? centerNodeAt({ x: 0, y: 0 }),
+    })),
+    relationships: routes,
+    communities: [],
   };
+}
 
-  layoutCache.set(signature, result);
-  return result;
+export function ensureClassicPositions(
+  graph: GraphResponse,
+  savedPositions: ClassicPositionStore,
+): { positions: ClassicPositionStore; addedConceptIds: number[] } {
+  const positions = sanitizeClassicPositionStore(savedPositions);
+  const placed = positionStoreToMap(positions);
+  const addedConceptIds: number[] = [];
+
+  graph.nodes
+    .slice()
+    .sort((left, right) => left.id - right.id)
+    .forEach((concept) => {
+      if (placed.has(concept.id)) return;
+
+      cacheStats.initialPlacementComputations += 1;
+      const position = initialClassicPosition(concept, graph, placed);
+      positions[String(concept.id)] = position;
+      placed.set(concept.id, position);
+      addedConceptIds.push(concept.id);
+    });
+
+  return { positions, addedConceptIds };
+}
+
+export function reorganizeClassicPositions(graph: GraphResponse): ClassicPositionStore {
+  cacheStats.reorganizeComputations += 1;
+
+  const distances = distanceMap(graph.center_id, graph.relationships);
+  const maxDistance = Math.max(0, ...Array.from(distances.values()));
+  const degrees = degreeMap(graph.relationships);
+  const groups = new Map<number, Concept[]>();
+
+  graph.nodes.forEach((concept) => {
+    const distance = distances.get(concept.id) ?? maxDistance + 1;
+    groups.set(distance, [...(groups.get(distance) ?? []), concept]);
+  });
+
+  const positions = new Map<number, Point>();
+  Array.from(groups.entries())
+    .sort(([left], [right]) => left - right)
+    .forEach(([distance, concepts]) => {
+      const ordered = stableConceptOrder(concepts, degrees);
+      if (distance === 0) {
+        ordered.forEach((concept) => positions.set(concept.id, centerNodeAt({ x: 0, y: 0 })));
+        return;
+      }
+
+      const radius = CLASSIC_RING_SPACING + (distance - 1) * 220;
+      ordered.forEach((concept, index) => {
+        const angle =
+          ordered.length === 1
+            ? 0
+            : (index / ordered.length) * Math.PI * 2 - Math.PI / 2 + (distance % 2) * 0.18;
+        const preferred = centerNodeAt({
+          x: Math.cos(angle) * radius,
+          y: Math.sin(angle) * radius,
+        });
+        positions.set(concept.id, findOpenPosition(preferred, positions));
+      });
+    });
+
+  return mapToPositionStore(positions);
+}
+
+export function updateClassicPosition(
+  positions: ClassicPositionStore,
+  conceptId: number,
+  position: Point,
+): ClassicPositionStore {
+  return {
+    ...sanitizeClassicPositionStore(positions),
+    [String(conceptId)]: snapPoint(position),
+  };
+}
+
+export function sanitizeClassicPositionStore(raw: unknown): ClassicPositionStore {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+
+  const store: ClassicPositionStore = {};
+  Object.entries(raw).forEach(([key, value]) => {
+    if (!/^\d+$/.test(key) || !isPoint(value)) return;
+    store[key] = snapPoint(value);
+  });
+  return store;
+}
+
+export function classicPositionStoresEqual(left: ClassicPositionStore, right: ClassicPositionStore) {
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key, index) => {
+    if (key !== rightKeys[index]) return false;
+    return left[key].x === right[key].x && left[key].y === right[key].y;
+  });
+}
+
+export function routeRelationships(
+  relationships: Relationship[],
+  positions: Map<number, Point>,
+): RoutedRelationship[] {
+  cacheStats.routeComputations += 1;
+
+  const knownRelationships = relationships.filter(
+    (relationship) => positions.has(relationship.source_concept_id) && positions.has(relationship.target_concept_id),
+  );
+  const groups = new Map<string, Relationship[]>();
+  knownRelationships.forEach((relationship) => {
+    const key = relationshipPairKey(relationship);
+    groups.set(key, [...(groups.get(key) ?? []), relationship]);
+  });
+
+  return Array.from(groups.values())
+    .flatMap((group) => {
+      const sortedGroup = group
+        .slice()
+        .sort(
+          (left, right) =>
+            left.source_concept_id - right.source_concept_id ||
+            left.target_concept_id - right.target_concept_id ||
+            left.id - right.id ||
+            left.relationship_type.localeCompare(right.relationship_type),
+        );
+      const hasBidirectional = sortedGroup.some((relationship) =>
+        sortedGroup.some(
+          (candidate) =>
+            candidate.id !== relationship.id &&
+            candidate.source_concept_id === relationship.target_concept_id &&
+            candidate.target_concept_id === relationship.source_concept_id,
+        ),
+      );
+
+      return sortedGroup.map((relationship, index) => {
+        const sourcePosition = positions.get(relationship.source_concept_id)!;
+        const targetPosition = positions.get(relationship.target_concept_id)!;
+        const { sourceSide, targetSide } = chooseConnectionSides(sourcePosition, targetPosition);
+        const centeredIndex = index - (sortedGroup.length - 1) / 2;
+
+        return {
+          id: String(relationship.id),
+          relationshipId: relationship.id,
+          source: String(relationship.source_concept_id),
+          target: String(relationship.target_concept_id),
+          relationshipType: relationship.relationship_type,
+          label: relationship.relationship_type,
+          mastery: relationship.mastery_score,
+          confidence: relationship.confidence,
+          relationship,
+          sourceSide,
+          targetSide,
+          parallelIndex: index,
+          parallelCount: sortedGroup.length,
+          curveOffset: Math.round(centeredIndex * 42),
+          bidirectional: hasBidirectional,
+        };
+      });
+    })
+    .sort((left, right) => left.relationshipId - right.relationshipId);
+}
+
+export function chooseConnectionSides(sourcePosition: Point, targetPosition: Point) {
+  const sourceCenter = nodeCenter(sourcePosition);
+  const targetCenter = nodeCenter(targetPosition);
+  const dx = targetCenter.x - sourceCenter.x;
+  const dy = targetCenter.y - sourceCenter.y;
+
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return {
+      sourceSide: dx >= 0 ? 'right' : 'left',
+      targetSide: dx >= 0 ? 'left' : 'right',
+    } satisfies { sourceSide: PortSide; targetSide: PortSide };
+  }
+
+  return {
+    sourceSide: dy >= 0 ? 'bottom' : 'top',
+    targetSide: dy >= 0 ? 'top' : 'bottom',
+  } satisfies { sourceSide: PortSide; targetSide: PortSide };
+}
+
+export function classicRelationshipPath(
+  source: Point,
+  target: Point,
+  curveOffset: number,
+): { path: string; labelX: number; labelY: number } {
+  const dx = target.x - source.x;
+  const dy = target.y - source.y;
+  const distance = Math.max(1, Math.hypot(dx, dy));
+  const directionX = dx / distance;
+  const directionY = dy / distance;
+  const normalX = -directionY;
+  const normalY = directionX;
+  const controlDistance = Math.min(260, Math.max(80, distance * 0.36));
+  const offsetX = normalX * curveOffset;
+  const offsetY = normalY * curveOffset;
+  const control1 = {
+    x: source.x + directionX * controlDistance + offsetX,
+    y: source.y + directionY * controlDistance + offsetY,
+  };
+  const control2 = {
+    x: target.x - directionX * controlDistance + offsetX,
+    y: target.y - directionY * controlDistance + offsetY,
+  };
+  const label = cubicPoint(source, control1, control2, target, 0.5);
+
+  return {
+    path: `M ${source.x},${source.y} C ${control1.x},${control1.y} ${control2.x},${control2.y} ${target.x},${target.y}`,
+    labelX: label.x,
+    labelY: label.y,
+  };
 }
 
 export function distanceMap(centerId: number, relationships: Relationship[]) {
@@ -299,68 +438,6 @@ export function distanceMap(centerId: number, relationships: Relationship[]) {
   return distances;
 }
 
-export function routeRelationships(
-  relationships: Relationship[],
-  positions: Map<number, Point>,
-  nodeCommunity: Map<number, number> = new Map(),
-): RoutedRelationship[] {
-  const knownRelationships = relationships.filter(
-    (relationship) => positions.has(relationship.source_concept_id) && positions.has(relationship.target_concept_id),
-  );
-  const groups = new Map<string, Relationship[]>();
-  knownRelationships.forEach((relationship) => {
-    const key = relationshipPairKey(relationship);
-    groups.set(key, [...(groups.get(key) ?? []), relationship]);
-  });
-
-  const nodeRects = Array.from(positions.entries()).map(([nodeId, position]) => ({
-    nodeId,
-    rect: nodeRect(position),
-  }));
-
-  return Array.from(groups.values())
-    .flatMap((group) => {
-      const sortedGroup = group
-        .slice()
-        .sort(
-          (left, right) =>
-            left.source_concept_id - right.source_concept_id ||
-            left.target_concept_id - right.target_concept_id ||
-            left.relationship_type.localeCompare(right.relationship_type) ||
-            left.id - right.id,
-        );
-      return sortedGroup.map((relationship, index) => {
-        const lane = index - (sortedGroup.length - 1) / 2;
-        const sourcePosition = positions.get(relationship.source_concept_id)!;
-        const targetPosition = positions.get(relationship.target_concept_id)!;
-        const sourceCenter = nodeCenter(sourcePosition);
-        const targetCenter = nodeCenter(targetPosition);
-        const obstacleCount = nodeRects.filter(
-          ({ nodeId, rect }) =>
-            nodeId !== relationship.source_concept_id &&
-            nodeId !== relationship.target_concept_id &&
-            lineIntersectsRect(sourceCenter, targetCenter, rect),
-        ).length;
-        const laneDirection = lane === 0 ? deterministicSign(relationship) : Math.sign(lane);
-        const laneOffset = roundToGrid(lane * 34 + laneDirection * obstacleCount * GRAPH_GRID_SIZE, 2);
-        const sourceCommunity = nodeCommunity.get(relationship.source_concept_id) ?? null;
-        const targetCommunity = nodeCommunity.get(relationship.target_concept_id) ?? null;
-        return {
-          relationship,
-          lane,
-          laneOffset,
-          sourceSide: sideToward(sourceCenter, targetCenter),
-          targetSide: sideToward(targetCenter, sourceCenter),
-          sourceCommunityId: sourceCommunity,
-          targetCommunityId: targetCommunity,
-          isCrossCommunity: Boolean(sourceCommunity && targetCommunity && sourceCommunity !== targetCommunity),
-          obstacleCount,
-        };
-      });
-    })
-    .sort((left, right) => left.relationship.id - right.relationship.id);
-}
-
 export function relationshipPairKey(relationship: Pick<Relationship, 'source_concept_id' | 'target_concept_id'>) {
   const source = Math.min(relationship.source_concept_id, relationship.target_concept_id);
   const target = Math.max(relationship.source_concept_id, relationship.target_concept_id);
@@ -372,22 +449,6 @@ export function snapPoint(point: Point, gridSize = GRAPH_GRID_SIZE): Point {
     x: normalizeZero(Math.round(point.x / gridSize) * gridSize),
     y: normalizeZero(Math.round(point.y / gridSize) * gridSize),
   };
-}
-
-export function lineIntersectsRect(start: Point, end: Point, rect: Bounds) {
-  if (pointInRect(start, rect) || pointInRect(end, rect)) return true;
-
-  const topLeft = { x: rect.x, y: rect.y };
-  const topRight = { x: rect.x + rect.width, y: rect.y };
-  const bottomLeft = { x: rect.x, y: rect.y + rect.height };
-  const bottomRight = { x: rect.x + rect.width, y: rect.y + rect.height };
-
-  return (
-    segmentsIntersect(start, end, topLeft, topRight) ||
-    segmentsIntersect(start, end, topRight, bottomRight) ||
-    segmentsIntersect(start, end, bottomRight, bottomLeft) ||
-    segmentsIntersect(start, end, bottomLeft, topLeft)
-  );
 }
 
 export function generateSyntheticGraph(nodeCount: number, relationshipCount: number): GraphResponse {
@@ -415,218 +476,80 @@ export function generateSyntheticGraph(nodeCount: number, relationshipCount: num
   };
 }
 
-function layeredPositions(graph: GraphResponse) {
-  const distances = distanceMap(graph.center_id, graph.relationships);
-  const maxDistance = Math.max(0, ...Array.from(distances.values()));
-  const degrees = degreeMap(graph.relationships);
-  const groups = graph.nodes.reduce<Map<number, Concept[]>>((acc, concept) => {
-    const distance = distances.get(concept.id) ?? maxDistance + 1;
-    acc.set(distance, [...(acc.get(distance) ?? []), concept]);
-    return acc;
-  }, new Map());
-  const positions = new Map<number, Point>();
+function initialClassicPosition(concept: Concept, graph: GraphResponse, placed: Map<number, Point>) {
+  const placedRelatedCenters = graph.relationships
+    .map((relationship) => {
+      if (relationship.source_concept_id === concept.id) return placed.get(relationship.target_concept_id);
+      if (relationship.target_concept_id === concept.id) return placed.get(relationship.source_concept_id);
+      return undefined;
+    })
+    .filter((position): position is Point => Boolean(position))
+    .map(nodeCenter);
 
-  Array.from(groups.entries())
-    .sort(([left], [right]) => left - right)
-    .forEach(([distance, concepts]) => {
-      const ordered = stableConceptOrder(concepts, degrees);
-      if (distance === 0) {
-        ordered.forEach((concept) => positions.set(concept.id, snapPoint({ x: -GRAPH_NODE_WIDTH / 2, y: -GRAPH_NODE_HEIGHT / 2 })));
-        return;
-      }
-      const radius = 250 + (distance - 1) * 220;
-      ordered.forEach((concept, index) => {
-        const angle =
-          ordered.length <= 1
-            ? -Math.PI / 2
-            : (index / ordered.length) * Math.PI * 2 - Math.PI / 2 + (distance % 2) * 0.22;
-        positions.set(
-          concept.id,
-          snapPoint({
-            x: Math.cos(angle) * radius - GRAPH_NODE_WIDTH / 2,
-            y: Math.sin(angle) * radius - GRAPH_NODE_HEIGHT / 2,
-          }),
-        );
-      });
-    });
+  if (placed.size === 0 || concept.id === graph.center_id) {
+    return findOpenPosition(centerNodeAt({ x: 0, y: 0 }), placed);
+  }
 
-  return positions;
-}
+  if (placedRelatedCenters.length) {
+    const average = averagePoint(placedRelatedCenters);
+    const angle = concept.id * GOLDEN_ANGLE;
+    return findOpenPosition(
+      centerNodeAt({
+        x: average.x + Math.cos(angle) * CLASSIC_NODE_GAP_X,
+        y: average.y + Math.sin(angle) * CLASSIC_NODE_GAP_Y,
+      }),
+      placed,
+    );
+  }
 
-function classicPositions(graph: GraphResponse) {
-  const concepts = graph.nodes.slice().sort((left, right) => left.id - right.id);
-  const positions = new Map<number, Point>();
-  const velocities = new Map<number, Point>();
-  const conceptIds = new Set(concepts.map((concept) => concept.id));
-  const relationships = graph.relationships.filter(
-    (relationship) => conceptIds.has(relationship.source_concept_id) && conceptIds.has(relationship.target_concept_id),
+  const angle = placed.size * GOLDEN_ANGLE;
+  const radius = CLASSIC_RING_SPACING + Math.sqrt(placed.size) * 96;
+  return findOpenPosition(
+    centerNodeAt({
+      x: Math.cos(angle) * radius,
+      y: Math.sin(angle) * radius,
+    }),
+    placed,
   );
-  const iterations = concepts.length > 300 ? 38 : concepts.length > 120 ? 54 : 76;
+}
 
-  concepts.forEach((concept, index) => {
-    const angle = index * GOLDEN_ANGLE;
-    const radius = index === 0 ? 0 : 150 + Math.sqrt(index) * 72;
-    positions.set(concept.id, {
-      x: Math.cos(angle) * radius - GRAPH_NODE_WIDTH / 2,
-      y: Math.sin(angle) * radius - GRAPH_NODE_HEIGHT / 2,
-    });
-    velocities.set(concept.id, { x: 0, y: 0 });
-  });
+function findOpenPosition(preferred: Point, placed: Map<number, Point>): Point {
+  const preferredSlot = snapPoint(preferred);
+  if (!collidesWithAny(preferredSlot, placed)) return preferredSlot;
 
-  for (let iteration = 0; iteration < iterations; iteration += 1) {
-    const cooling = 1 - iteration / iterations;
-    for (let leftIndex = 0; leftIndex < concepts.length; leftIndex += 1) {
-      for (let rightIndex = leftIndex + 1; rightIndex < concepts.length; rightIndex += 1) {
-        const left = concepts[leftIndex];
-        const right = concepts[rightIndex];
-        const leftCenter = nodeCenter(positions.get(left.id)!);
-        const rightCenter = nodeCenter(positions.get(right.id)!);
-        const vector = normalizedVector(leftCenter, rightCenter);
-        const force = Math.min(18, 52000 / Math.max(160, vector.distance * vector.distance)) * cooling;
-        applyForce(velocities, left.id, -vector.x * force, -vector.y * force);
-        applyForce(velocities, right.id, vector.x * force, vector.y * force);
+  for (let ring = 1; ring <= 48; ring += 1) {
+    for (let column = -ring; column <= ring; column += 1) {
+      for (let row = -ring; row <= ring; row += 1) {
+        if (Math.abs(column) !== ring && Math.abs(row) !== ring) continue;
+        const candidate = snapPoint({
+          x: preferredSlot.x + column * CLASSIC_NODE_GAP_X,
+          y: preferredSlot.y + row * CLASSIC_NODE_GAP_Y,
+        });
+        if (!collidesWithAny(candidate, placed)) return candidate;
       }
     }
-
-    relationships.forEach((relationship) => {
-      const sourceCenter = nodeCenter(positions.get(relationship.source_concept_id)!);
-      const targetCenter = nodeCenter(positions.get(relationship.target_concept_id)!);
-      const vector = normalizedVector(sourceCenter, targetCenter);
-      const force = (vector.distance - CLASSIC_EDGE_LENGTH) * 0.035 * cooling;
-      applyForce(velocities, relationship.source_concept_id, vector.x * force, vector.y * force);
-      applyForce(velocities, relationship.target_concept_id, -vector.x * force, -vector.y * force);
-    });
-
-    concepts.forEach((concept) => {
-      const position = positions.get(concept.id)!;
-      const velocity = velocities.get(concept.id)!;
-      const anchorPull = concept.id === graph.center_id ? 0.04 : 0.006;
-      velocity.x += (-position.x - GRAPH_NODE_WIDTH / 2) * anchorPull * cooling;
-      velocity.y += (-position.y - GRAPH_NODE_HEIGHT / 2) * anchorPull * cooling;
-      positions.set(concept.id, {
-        x: position.x + clamp(velocity.x, -24, 24),
-        y: position.y + clamp(velocity.y, -24, 24),
-      });
-      velocities.set(concept.id, {
-        x: velocity.x * 0.62,
-        y: velocity.y * 0.62,
-      });
-    });
   }
 
-  concepts.forEach((concept) => {
-    positions.set(concept.id, snapPoint(positions.get(concept.id)!));
+  return snapPoint({
+    x: preferredSlot.x + (placed.size + 1) * CLASSIC_NODE_GAP_X,
+    y: preferredSlot.y,
   });
-
-  return positions;
 }
 
-function clusteredPositions(graph: GraphResponse, communityResult: CommunityDetectionResult) {
-  const positions = new Map<number, Point>();
-  const degrees = degreeMap(graph.relationships);
-  const communities = communityResult.communities;
-  const largestCommunitySize = Math.max(1, ...communities.map((community) => community.nodeIds.length));
-  const ringRadius = communities.length <= 1 ? 0 : Math.max(430, communities.length * 190, Math.sqrt(largestCommunitySize) * 150);
-
-  communities.forEach((community, communityIndex) => {
-    const communityAngle =
-      communities.length <= 1 ? 0 : (communityIndex / communities.length) * Math.PI * 2 - Math.PI / 2 + 0.18;
-    const communityCenter = {
-      x: Math.cos(communityAngle) * ringRadius,
-      y: Math.sin(communityAngle) * ringRadius,
-    };
-    const members = community.nodeIds
-      .map((nodeId) => graph.nodes.find((concept) => concept.id === nodeId))
-      .filter((concept): concept is Concept => Boolean(concept));
-    const orderedMembers = stableConceptOrder(members, degrees);
-    const columns = Math.max(1, Math.ceil(Math.sqrt(orderedMembers.length)));
-    const rows = Math.max(1, Math.ceil(orderedMembers.length / columns));
-    const cellWidth = GRAPH_NODE_WIDTH + 72;
-    const cellHeight = GRAPH_NODE_HEIGHT + 72;
-
-    orderedMembers.forEach((concept, index) => {
-      const column = index % columns;
-      const row = Math.floor(index / columns);
-      positions.set(
-        concept.id,
-        snapPoint({
-          x: communityCenter.x + (column - (columns - 1) / 2) * cellWidth - GRAPH_NODE_WIDTH / 2,
-          y: communityCenter.y + (row - (rows - 1) / 2) * cellHeight - GRAPH_NODE_HEIGHT / 2,
-        }),
-      );
-    });
-  });
-
-  return positions;
+function collidesWithAny(candidate: Point, placed: Map<number, Point>) {
+  return Array.from(placed.values()).some((position) => nodesOverlap(candidate, position));
 }
 
-function boundsForNodeIds(nodeIds: number[], positions: Map<number, Point>): Bounds {
-  const points = nodeIds.map((nodeId) => positions.get(nodeId)).filter((point): point is Point => Boolean(point));
-  if (!points.length) return { x: 0, y: 0, width: 0, height: 0 };
-
-  const minX = Math.min(...points.map((point) => point.x));
-  const minY = Math.min(...points.map((point) => point.y));
-  const maxX = Math.max(...points.map((point) => point.x + GRAPH_NODE_WIDTH));
-  const maxY = Math.max(...points.map((point) => point.y + GRAPH_NODE_HEIGHT));
-
-  return {
-    x: snapPoint({ x: minX - COMMUNITY_PADDING, y: 0 }).x,
-    y: snapPoint({ x: 0, y: minY - COMMUNITY_PADDING }).y,
-    width: Math.ceil((maxX - minX + COMMUNITY_PADDING * 2) / GRAPH_GRID_SIZE) * GRAPH_GRID_SIZE,
-    height: Math.ceil((maxY - minY + COMMUNITY_PADDING * 2) / GRAPH_GRID_SIZE) * GRAPH_GRID_SIZE,
-  };
+function nodesOverlap(left: Point, right: Point) {
+  return Math.abs(left.x - right.x) < GRAPH_NODE_WIDTH + 48 && Math.abs(left.y - right.y) < GRAPH_NODE_HEIGHT + 48;
 }
 
-function centerOfBounds(bounds: Bounds): Point {
-  return {
-    x: bounds.x + bounds.width / 2,
-    y: bounds.y + bounds.height / 2,
-  };
+function positionStoreToMap(store: ClassicPositionStore) {
+  return new Map(Object.entries(store).map(([conceptId, position]) => [Number(conceptId), position]));
 }
 
-function buildAdjacencyMap(nodeIds: number[], relationships: Relationship[]) {
-  const adjacency = new Map<number, Set<number>>();
-  nodeIds.forEach((nodeId) => adjacency.set(nodeId, new Set()));
-  relationships.forEach((relationship) => {
-    if (!adjacency.has(relationship.source_concept_id) || !adjacency.has(relationship.target_concept_id)) return;
-    if (relationship.source_concept_id === relationship.target_concept_id) return;
-    adjacency.get(relationship.source_concept_id)!.add(relationship.target_concept_id);
-    adjacency.get(relationship.target_concept_id)!.add(relationship.source_concept_id);
-  });
-  return adjacency;
-}
-
-function splitDisconnectedCommunity(nodeIds: number[], adjacency: Map<number, Set<number>>) {
-  const remaining = new Set(nodeIds);
-  const groups: number[][] = [];
-  while (remaining.size) {
-    const start = Array.from(remaining).sort((left, right) => left - right)[0];
-    const queue = [start];
-    const group: number[] = [];
-    remaining.delete(start);
-    while (queue.length) {
-      const current = queue.shift()!;
-      group.push(current);
-      adjacency.get(current)?.forEach((neighbor) => {
-        if (remaining.has(neighbor) && nodeIds.includes(neighbor)) {
-          remaining.delete(neighbor);
-          queue.push(neighbor);
-        }
-      });
-    }
-    groups.push(group);
-  }
-  return groups;
-}
-
-function countInternalRelationships(nodeIds: number[], relationships: Relationship[]) {
-  const nodeSet = new Set(nodeIds);
-  return relationships.filter(
-    (relationship) =>
-      relationship.source_concept_id !== relationship.target_concept_id &&
-      nodeSet.has(relationship.source_concept_id) &&
-      nodeSet.has(relationship.target_concept_id),
-  ).length;
+function mapToPositionStore(map: Map<number, Point>) {
+  return Object.fromEntries(Array.from(map.entries()).map(([conceptId, position]) => [String(conceptId), position]));
 }
 
 function degreeMap(relationships: Relationship[]) {
@@ -649,13 +572,11 @@ function stableConceptOrder(concepts: Concept[], degrees: Map<number, number>) {
     );
 }
 
-function nodeRect(position: Point): Bounds {
-  return {
-    x: position.x,
-    y: position.y,
-    width: GRAPH_NODE_WIDTH,
-    height: GRAPH_NODE_HEIGHT,
-  };
+function centerNodeAt(center: Point): Point {
+  return snapPoint({
+    x: center.x - GRAPH_NODE_WIDTH / 2,
+    y: center.y - GRAPH_NODE_HEIGHT / 2,
+  });
 }
 
 function nodeCenter(position: Point): Point {
@@ -665,91 +586,37 @@ function nodeCenter(position: Point): Point {
   };
 }
 
-function sideToward(source: Point, target: Point): PortSide {
-  const dx = target.x - source.x;
-  const dy = target.y - source.y;
-  if (Math.abs(dx) >= Math.abs(dy)) {
-    return dx >= 0 ? 'right' : 'left';
-  }
-  return dy >= 0 ? 'bottom' : 'top';
-}
-
-function pointInRect(point: Point, rect: Bounds) {
-  return point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height;
-}
-
-function segmentsIntersect(a: Point, b: Point, c: Point, d: Point) {
-  const direction1 = orientation(a, b, c);
-  const direction2 = orientation(a, b, d);
-  const direction3 = orientation(c, d, a);
-  const direction4 = orientation(c, d, b);
-
-  if (direction1 === 0 && onSegment(a, c, b)) return true;
-  if (direction2 === 0 && onSegment(a, d, b)) return true;
-  if (direction3 === 0 && onSegment(c, a, d)) return true;
-  if (direction4 === 0 && onSegment(c, b, d)) return true;
-
-  return direction1 !== direction2 && direction3 !== direction4;
-}
-
-function orientation(a: Point, b: Point, c: Point) {
-  const value = (b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y);
-  if (Math.abs(value) < 0.0001) return 0;
-  return value > 0 ? 1 : 2;
-}
-
-function onSegment(a: Point, b: Point, c: Point) {
-  return (
-    b.x <= Math.max(a.x, c.x) &&
-    b.x >= Math.min(a.x, c.x) &&
-    b.y <= Math.max(a.y, c.y) &&
-    b.y >= Math.min(a.y, c.y)
-  );
-}
-
-function normalizedVector(source: Point, target: Point) {
-  const dx = target.x - source.x;
-  const dy = target.y - source.y;
-  const distance = Math.max(1, Math.hypot(dx, dy));
+function averagePoint(points: Point[]) {
   return {
-    x: dx / distance,
-    y: dy / distance,
-    distance,
+    x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+    y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
   };
 }
 
-function applyForce(velocities: Map<number, Point>, conceptId: number, x: number, y: number) {
-  const velocity = velocities.get(conceptId)!;
-  velocity.x += x;
-  velocity.y += y;
+function cubicPoint(start: Point, control1: Point, control2: Point, end: Point, t: number): Point {
+  const inverse = 1 - t;
+  return {
+    x:
+      inverse * inverse * inverse * start.x +
+      3 * inverse * inverse * t * control1.x +
+      3 * inverse * t * t * control2.x +
+      t * t * t * end.x,
+    y:
+      inverse * inverse * inverse * start.y +
+      3 * inverse * inverse * t * control1.y +
+      3 * inverse * t * t * control2.y +
+      t * t * t * end.y,
+  };
 }
 
-function deterministicSign(relationship: Relationship) {
-  return (relationship.id + relationship.source_concept_id + relationship.target_concept_id) % 2 === 0 ? 1 : -1;
-}
-
-function roundToGrid(value: number, step: number) {
-  return Math.round(value / step) * step;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
+function isPoint(value: unknown): value is Point {
+  if (!value || typeof value !== 'object') return false;
+  const maybePoint = value as Partial<Point>;
+  return Number.isFinite(maybePoint.x) && Number.isFinite(maybePoint.y);
 }
 
 function normalizeZero(value: number) {
   return Object.is(value, -0) ? 0 : value;
-}
-
-function createStableRng(seedInput: string) {
-  let seed = 2166136261;
-  for (let index = 0; index < seedInput.length; index += 1) {
-    seed ^= seedInput.charCodeAt(index);
-    seed = Math.imul(seed, 16777619);
-  }
-  return () => {
-    seed = Math.imul(seed, 1664525) + 1013904223;
-    return (seed >>> 0) / 4294967296;
-  };
 }
 
 function syntheticConcept(id: number, name: string, conceptType: Concept['concept_type']): Concept {

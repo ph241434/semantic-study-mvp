@@ -9,7 +9,19 @@ import { GraphCanvas } from '../components/GraphCanvas';
 import { GraphToolRail, type GraphDestination } from '../components/GraphToolRail';
 import { RelationshipForm } from '../components/RelationshipForm';
 import { SearchBox } from '../components/SearchBox';
-import { buildGraphLayout, graphLayoutModes, type GraphLayoutMode } from '../graph/layout';
+import {
+  CLASSIC_LAYOUT_STORAGE_KEY,
+  buildGraphLayout,
+  classicPositionStoresEqual,
+  ensureClassicPositions,
+  graphLayoutModes,
+  reorganizeClassicPositions,
+  sanitizeClassicPositionStore,
+  updateClassicPosition,
+  type ClassicPositionStore,
+  type GraphLayoutMode,
+  type Point,
+} from '../graph/layout';
 import type { Concept, GraphResponse, Question, Relationship } from '../types';
 
 type Props = {
@@ -33,7 +45,6 @@ type QuickPanel = 'concept' | 'relationship' | null;
 const SIDEBAR_COLLAPSED_KEY = 'semantic-study.graphSidebarCollapsed';
 const GRID_VISIBLE_KEY = 'semantic-study.graphGridVisible';
 const GRAPH_LAYOUT_KEY = 'semantic-study.graphLayoutMode';
-const COMMUNITY_LABELS_KEY = 'semantic-study.communityLabels';
 
 export function GraphPage({
   concepts,
@@ -56,10 +67,8 @@ export function GraphPage({
   const [quickPanel, setQuickPanel] = useState<QuickPanel>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useBooleanPreference(SIDEBAR_COLLAPSED_KEY, false);
   const [showGrid, setShowGrid] = useBooleanPreference(GRID_VISIBLE_KEY, true);
-  const [layoutMode, setLayoutMode] = useLayoutModePreference(GRAPH_LAYOUT_KEY, 'layered');
-  const [communityLabels, setCommunityLabels] = useCommunityLabelPreference(COMMUNITY_LABELS_KEY);
-  const [selectedCommunityId, setSelectedCommunityId] = useState<number | null>(null);
-  const [focusedCommunityId, setFocusedCommunityId] = useState<number | null>(null);
+  const [layoutMode, setLayoutMode] = useLayoutModePreference(GRAPH_LAYOUT_KEY, 'classic');
+  const [classicPositions, setClassicPositions] = useClassicPositionPreference(CLASSIC_LAYOUT_STORAGE_KEY);
   const [inspectorOpen, setInspectorOpen] = useState(Boolean(selectedConceptId || selectedRelationshipId));
   const [viewportRevision, setViewportRevision] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -68,8 +77,10 @@ export function GraphPage({
   const selectedConcept = concepts.find((concept) => concept.id === selectedConceptId) ?? null;
   const selectedRelationship = relationships.find((relationship) => relationship.id === selectedRelationshipId) ?? null;
   const detailConcept = selectedRelationship ? null : selectedConcept;
-  const graphLayout = useMemo(() => (graph ? buildGraphLayout(graph, layoutMode) : null), [graph, layoutMode]);
-  const communities = graphLayout?.communities ?? [];
+  const graphLayout = useMemo(
+    () => (graph ? buildGraphLayout(graph, layoutMode, { positions: classicPositions }) : null),
+    [classicPositions, graph, layoutMode],
+  );
 
   useEffect(() => {
     if (!selectedConceptId) {
@@ -98,28 +109,19 @@ export function GraphPage({
   }, [selectedConceptId, depth, expandedIds]);
 
   useEffect(() => {
+    if (!graph) return;
+
+    setClassicPositions((current) => {
+      const ensured = ensureClassicPositions(graph, current).positions;
+      return classicPositionStoresEqual(current, ensured) ? current : ensured;
+    });
+  }, [graph, setClassicPositions]);
+
+  useEffect(() => {
     if (selectedConceptId || selectedRelationshipId) {
       setInspectorOpen(true);
     }
   }, [selectedConceptId, selectedRelationshipId]);
-
-  useEffect(() => {
-    if (layoutMode !== 'clustered') {
-      setSelectedCommunityId(null);
-      setFocusedCommunityId(null);
-      return;
-    }
-
-    const hasSelectedCommunity = communities.some((community) => community.id === selectedCommunityId);
-    if (selectedCommunityId && !hasSelectedCommunity) {
-      setSelectedCommunityId(null);
-    }
-
-    const hasFocusedCommunity = communities.some((community) => community.id === focusedCommunityId);
-    if (focusedCommunityId && !hasFocusedCommunity) {
-      setFocusedCommunityId(null);
-    }
-  }, [communities, focusedCommunityId, layoutMode, selectedCommunityId]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -165,10 +167,19 @@ export function GraphPage({
     onSelectRelationship(null);
   }
 
-  function closeWorkspaceOverlays() {
-    closeInspector();
-    setSelectedCommunityId(null);
-    setFocusedCommunityId(null);
+  function saveClassicPosition(conceptId: number, position: Point) {
+    setClassicPositions((current) => updateClassicPosition(current, conceptId, position));
+  }
+
+  function reorganizeClassicGraph() {
+    if (!graph) return;
+
+    const nextVisiblePositions = reorganizeClassicPositions(graph);
+    setClassicPositions((current) => ({
+      ...current,
+      ...nextVisiblePositions,
+    }));
+    setViewportRevision((revision) => revision + 1);
   }
 
   async function conceptCreated(concept: Concept) {
@@ -195,48 +206,12 @@ export function GraphPage({
 
   function changeDepth(nextDepth: number) {
     setDepth(nextDepth);
-    setSelectedCommunityId(null);
-    setFocusedCommunityId(null);
     setViewportRevision((revision) => revision + 1);
   }
 
   function changeLayoutMode(nextMode: GraphLayoutMode) {
     setLayoutMode(nextMode);
-    setSelectedCommunityId(null);
-    setFocusedCommunityId(null);
     setViewportRevision((revision) => revision + 1);
-  }
-
-  function selectCommunity(communityId: number) {
-    setSelectedCommunityId((current) => (current === communityId ? null : communityId));
-    setFocusedCommunityId(null);
-  }
-
-  function focusCommunity(communityId: number | null) {
-    if (communityId === null) {
-      showAllCommunities();
-      return;
-    }
-    setSelectedCommunityId(communityId);
-    setFocusedCommunityId(communityId);
-  }
-
-  function showAllCommunities() {
-    setSelectedCommunityId(null);
-    setFocusedCommunityId(null);
-    setViewportRevision((revision) => revision + 1);
-  }
-
-  function changeCommunityLabel(stableKey: string, label: string) {
-    setCommunityLabels((current) => {
-      const next = { ...current };
-      if (label.trim()) {
-        next[stableKey] = label;
-      } else {
-        delete next[stableKey];
-      }
-      return next;
-    });
   }
 
   return (
@@ -251,19 +226,16 @@ export function GraphPage({
           graph={graph}
           layout={graphLayout}
           layoutMode={layoutMode}
+          classicPositions={classicPositions}
           selectedConceptId={selectedConceptId}
           selectedRelationshipId={selectedRelationshipId}
-          selectedCommunityId={selectedCommunityId}
-          focusedCommunityId={focusedCommunityId}
-          communityLabels={communityLabels}
           variant="workspace"
           showGrid={showGrid}
           viewportRevision={viewportRevision}
           onSelectConcept={selectConceptFromGraph}
           onSelectRelationship={selectRelationshipFromGraph}
-          onSelectCommunity={selectCommunity}
-          onFocusCommunity={focusCommunity}
-          onPaneClick={closeWorkspaceOverlays}
+          onNodePositionChange={saveClassicPosition}
+          onPaneClick={closeInspector}
         />
       </div>
 
@@ -277,18 +249,12 @@ export function GraphPage({
         error={catalogError ?? error}
         showGrid={showGrid}
         currentView={currentView}
-        communities={communities}
-        selectedCommunityId={selectedCommunityId}
-        focusedCommunityId={focusedCommunityId}
-        communityLabels={communityLabels}
         search={
           <SearchBox
             variant="dark"
             onSelect={(concept) => {
               onSelectRelationship(null);
               onSelectConcept(concept.id);
-              setSelectedCommunityId(null);
-              setFocusedCommunityId(null);
               setInspectorOpen(true);
               setViewportRevision((revision) => revision + 1);
             }}
@@ -298,13 +264,10 @@ export function GraphPage({
         onDepthChange={changeDepth}
         onLayoutModeChange={changeLayoutMode}
         onGridChange={setShowGrid}
-        onCommunitySelect={selectCommunity}
-        onCommunityFocus={focusCommunity}
-        onShowAllCommunities={showAllCommunities}
-        onCommunityLabelChange={changeCommunityLabel}
         onOpenConcept={() => setQuickPanel('concept')}
         onOpenRelationship={() => setQuickPanel('relationship')}
         onFitGraph={() => setViewportRevision((revision) => revision + 1)}
+        onReorganize={reorganizeClassicGraph}
         onResetExpanded={() => setExpandedIds(new Set())}
         onNavigate={onChangeView}
       />
@@ -417,8 +380,8 @@ function readLayoutModePreference(key: string, fallback: GraphLayoutMode) {
   return graphLayoutModes.includes(stored as GraphLayoutMode) ? (stored as GraphLayoutMode) : fallback;
 }
 
-function useCommunityLabelPreference(key: string) {
-  const [value, setValue] = useState<Record<string, string>>(() => readCommunityLabels(key));
+function useClassicPositionPreference(key: string) {
+  const [value, setValue] = useState<ClassicPositionStore>(() => readClassicPositions(key));
 
   useEffect(() => {
     window.localStorage.setItem(key, JSON.stringify(value));
@@ -427,16 +390,12 @@ function useCommunityLabelPreference(key: string) {
   return [value, setValue] as const;
 }
 
-function readCommunityLabels(key: string) {
+function readClassicPositions(key: string) {
   if (typeof window === 'undefined') return {};
   const stored = window.localStorage.getItem(key);
   if (!stored) return {};
   try {
-    const parsed = JSON.parse(stored) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    return Object.fromEntries(
-      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
-    );
+    return sanitizeClassicPositionStore(JSON.parse(stored) as unknown);
   } catch {
     return {};
   }

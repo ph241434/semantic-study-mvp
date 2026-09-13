@@ -1,55 +1,64 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { ClassicPositionStore, GraphLayoutMode, GraphLayoutResult, Point } from '../graph/layout';
 import type { Concept, GraphResponse, Question, Relationship } from '../types';
 
 vi.mock('../components/GraphCanvas', () => ({
   GraphCanvas: ({
     graph,
+    layout,
     onSelectConcept,
     onSelectRelationship,
+    onNodePositionChange,
     onPaneClick,
     variant,
     showGrid,
     layoutMode,
-    selectedCommunityId,
-    focusedCommunityId,
     viewportRevision,
   }: {
     graph: GraphResponse | null;
+    layout: GraphLayoutResult | null;
+    classicPositions: ClassicPositionStore;
     onSelectConcept: (conceptId: number) => void;
     onSelectRelationship: (relationshipId: number) => void;
+    onNodePositionChange?: (conceptId: number, position: Point) => void;
     onPaneClick: () => void;
     variant: string;
     showGrid: boolean;
-    layoutMode: string;
-    selectedCommunityId: number | null;
-    focusedCommunityId: number | null;
+    layoutMode: GraphLayoutMode;
     viewportRevision: number;
-  }) => (
-    <div
-      data-testid="mock-graph-canvas"
-      data-variant={variant}
-      data-grid={String(showGrid)}
-      data-layout={layoutMode}
-      data-selected-community={String(selectedCommunityId)}
-      data-focused-community={String(focusedCommunityId)}
-      data-viewport-revision={viewportRevision}
-      data-node-count={graph?.nodes.length ?? 0}
-    >
-      <button type="button" onClick={() => onSelectConcept(2)}>
-        Select mock node
-      </button>
-      <button type="button" onClick={() => onSelectRelationship(10)}>
-        Select mock edge
-      </button>
-      <button type="button" onClick={onPaneClick}>
-        Click empty canvas
-      </button>
-    </div>
-  ),
+  }) => {
+    const nodeTwo = layout?.nodes.find((node) => node.conceptId === 2);
+
+    return (
+      <div
+        data-testid="mock-graph-canvas"
+        data-variant={variant}
+        data-grid={String(showGrid)}
+        data-layout={layoutMode}
+        data-viewport-revision={viewportRevision}
+        data-node-count={graph?.nodes.length ?? 0}
+        data-node-two-x={nodeTwo?.position.x ?? ''}
+        data-node-two-y={nodeTwo?.position.y ?? ''}
+      >
+        <button type="button" onClick={() => onSelectConcept(2)}>
+          Select mock node
+        </button>
+        <button type="button" onClick={() => onSelectRelationship(10)}>
+          Select mock edge
+        </button>
+        <button type="button" onClick={() => onNodePositionChange?.(2, { x: 120, y: 144 })}>
+          Drag mock node
+        </button>
+        <button type="button" onClick={onPaneClick}>
+          Click empty canvas
+        </button>
+      </div>
+    );
+  },
 }));
 
 vi.mock('../api/client', () => ({
@@ -65,7 +74,7 @@ vi.mock('../api/client', () => ({
 }));
 
 import { api } from '../api/client';
-import { clearGraphLayoutCaches, getGraphLayoutCacheStats } from '../graph/layout';
+import { CLASSIC_LAYOUT_STORAGE_KEY, clearGraphLayoutCaches, getGraphLayoutCacheStats } from '../graph/layout';
 import { GraphPage } from './GraphPage';
 
 const concepts = [concept(1, "Dijkstra's Algorithm", 'algorithm'), concept(2, 'Priority Queue', 'definition')];
@@ -141,7 +150,7 @@ function Harness({ onChangeView = vi.fn() }: { onChangeView?: (view: 'dashboard'
   );
 }
 
-describe('GraphPage workspace redesign', () => {
+describe('GraphPage classic graph workspace', () => {
   beforeEach(() => {
     window.localStorage.clear();
     clearGraphLayoutCaches();
@@ -164,6 +173,7 @@ describe('GraphPage workspace redesign', () => {
     expect(screen.getByTestId('graph-workspace')).toHaveClass('graph-workspace');
     const canvas = await screen.findByTestId('mock-graph-canvas');
     expect(canvas).toHaveAttribute('data-variant', 'workspace');
+    expect(canvas).toHaveAttribute('data-layout', 'classic');
     expect(screen.getByTestId('graph-tool-rail')).toHaveAttribute('data-collapsed', 'false');
     expect(screen.getByRole('button', { name: 'Add Concept' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add Relationship' })).toBeInTheDocument();
@@ -200,46 +210,66 @@ describe('GraphPage workspace redesign', () => {
     expect(screen.getByRole('dialog', { name: 'Add Relationship' })).toBeInTheDocument();
   });
 
-  it('keeps search and fit controls accessible from the sidebar', async () => {
+  it('keeps Classic controls available from the sidebar', async () => {
     render(<Harness />);
     await screen.findByTestId('mock-graph-canvas');
 
     expect(screen.getByPlaceholderText('Search concepts')).toBeInTheDocument();
-    expect(screen.getByLabelText('Graph layout')).toHaveValue('layered');
+    expect(screen.getByLabelText('Graph layout')).toHaveValue('classic');
+    expect(screen.getByRole('button', { name: 'Reorganize' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Fit Graph' }));
     expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-viewport-revision', '1');
   });
 
-  it('switches to clustered layout while preserving the selected concept', async () => {
+  it('falls back to Classic when an obsolete layout preference is stored', async () => {
+    window.localStorage.setItem('semantic-study.graphLayoutMode', 'clustered');
+
     render(<Harness />);
-    await screen.findByTestId('mock-graph-canvas');
+    const canvas = await screen.findByTestId('mock-graph-canvas');
 
-    fireEvent.change(screen.getByLabelText('Graph layout'), { target: { value: 'clustered' } });
-
-    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-layout', 'clustered');
-    expect(screen.getByTestId('graph-inspector')).toHaveTextContent("Dijkstra's Algorithm");
-    expect(screen.getByLabelText('Community 1 display name')).toBeInTheDocument();
+    expect(screen.getByLabelText('Graph layout')).toHaveValue('classic');
+    expect(canvas).toHaveAttribute('data-layout', 'classic');
+    await waitFor(() => expect(window.localStorage.getItem('semantic-study.graphLayoutMode')).toBe('classic'));
   });
 
-  it('stores community display labels without changing derived membership', async () => {
+  it('persists manual Classic node positions from drag callbacks', async () => {
     render(<Harness />);
     await screen.findByTestId('mock-graph-canvas');
-    fireEvent.change(screen.getByLabelText('Graph layout'), { target: { value: 'clustered' } });
 
-    fireEvent.change(screen.getByLabelText('Community 1 display name'), { target: { value: 'Graph Algorithms' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Drag mock node' }));
 
-    expect(window.localStorage.getItem('semantic-study.communityLabels')).toContain('Graph Algorithms');
-    expect(screen.getAllByRole('button', { name: /Graph Algorithms/ }).length).toBeGreaterThan(0);
+    await waitFor(() => {
+      const stored = readStoredClassicPositions();
+      expect(stored['2']).toEqual({ x: 120, y: 144 });
+    });
   });
 
-  it('does not recompute layout when the sidebar is collapsed', async () => {
+  it('does not recompute layout when grid or sidebar-only state changes', async () => {
     render(<Harness />);
-    await screen.findByTestId('mock-graph-canvas');
+    await waitFor(() => expect(readStoredClassicPositions()['1']).toBeDefined());
     const before = getGraphLayoutCacheStats();
 
+    fireEvent.click(screen.getByLabelText('Grid'));
     fireEvent.click(screen.getByRole('button', { name: 'Collapse Sidebar' }));
 
+    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-grid', 'false');
     expect(getGraphLayoutCacheStats().layoutComputations).toBe(before.layoutComputations);
+  });
+
+  it('reorganizes Classic positions only when explicitly requested', async () => {
+    render(<Harness />);
+    await screen.findByTestId('mock-graph-canvas');
+    fireEvent.click(screen.getByRole('button', { name: 'Drag mock node' }));
+    await waitFor(() => expect(readStoredClassicPositions()['2']).toEqual({ x: 120, y: 144 }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reorganize' }));
+
+    await waitFor(() => {
+      const stored = readStoredClassicPositions();
+      expect(stored['2']).not.toEqual({ x: 120, y: 144 });
+    });
+    expect(getGraphLayoutCacheStats().reorganizeComputations).toBe(1);
+    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-viewport-revision', '1');
   });
 
   it('opens the inspector from node selection and closes it from the canvas', async () => {
@@ -281,3 +311,7 @@ describe('GraphPage workspace redesign', () => {
     await waitFor(() => expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-grid', 'false'));
   });
 });
+
+function readStoredClassicPositions(): ClassicPositionStore {
+  return JSON.parse(window.localStorage.getItem(CLASSIC_LAYOUT_STORAGE_KEY) ?? '{}') as ClassicPositionStore;
+}

@@ -9,24 +9,27 @@ import {
   MiniMap,
   Position,
   ReactFlow,
-  ViewportPortal,
+  applyNodeChanges,
   useReactFlow,
-  useStore,
   type Edge,
   type EdgeProps,
   type Node,
+  type NodeChange,
   type NodeProps,
 } from '@xyflow/react';
-import { memo, useEffect, useMemo, useRef, type CSSProperties } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
 import {
   GRAPH_GRID_SIZE,
   GRAPH_NODE_HEIGHT,
   GRAPH_NODE_WIDTH,
   buildGraphLayout,
+  classicRelationshipPath,
+  snapPoint,
+  type ClassicPositionStore,
   type GraphLayoutMode,
   type GraphLayoutResult,
-  type LayoutCommunity,
+  type Point,
   type PortSide,
 } from '../graph/layout';
 import { masteryCategory, masteryPercent, masteryTheme } from '../styles/mastery';
@@ -36,15 +39,12 @@ type Props = {
   graph: GraphResponse | null;
   layout?: GraphLayoutResult | null;
   layoutMode?: GraphLayoutMode;
+  classicPositions?: ClassicPositionStore;
   selectedConceptId: number | null;
   selectedRelationshipId: number | null;
-  selectedCommunityId?: number | null;
-  focusedCommunityId?: number | null;
-  communityLabels?: Record<string, string>;
   onSelectConcept: (conceptId: number) => void;
   onSelectRelationship: (relationshipId: number) => void;
-  onSelectCommunity?: (communityId: number) => void;
-  onFocusCommunity?: (communityId: number | null) => void;
+  onNodePositionChange?: (conceptId: number, position: Point) => void;
   onPaneClick?: () => void;
   variant?: 'embedded' | 'workspace';
   showGrid?: boolean;
@@ -54,7 +54,6 @@ type Props = {
 type GraphNodeData = Record<string, unknown> & {
   concept: Concept;
   selected: boolean;
-  faded: boolean;
   nodeBackground: string;
   nodeBorder: string;
   nodeShadow: string | null;
@@ -62,11 +61,9 @@ type GraphNodeData = Record<string, unknown> & {
 
 type GraphEdgeData = Record<string, unknown> & {
   label: string;
-  laneOffset: number;
+  curveOffset: number;
   selected: boolean;
-  faded: boolean;
   dense: boolean;
-  isCrossCommunity: boolean;
 };
 
 type SemanticNode = Node<GraphNodeData, 'semanticConcept'>;
@@ -78,6 +75,8 @@ const portPositions: Array<{ side: PortSide; position: Position }> = [
   { side: 'bottom', position: Position.Bottom },
   { side: 'left', position: Position.Left },
 ];
+
+const workspaceGridStyle = { opacity: 0.36 } satisfies CSSProperties;
 
 function workspaceEdgeColor(score: number) {
   const category = masteryCategory(score);
@@ -95,12 +94,7 @@ function GraphConceptNode({ data }: NodeProps<SemanticNode>) {
   } satisfies CSSProperties;
 
   return (
-    <div
-      className={`graph-concept-node ${data.selected ? 'graph-concept-node-selected' : ''} ${
-        data.faded ? 'graph-concept-node-faded' : ''
-      }`}
-      style={style}
-    >
+    <div className={`graph-concept-node ${data.selected ? 'graph-concept-node-selected' : ''}`} style={style}>
       {portPositions.map(({ side, position }) => (
         <Handle
           key={`source-${side}`}
@@ -132,7 +126,7 @@ function GraphConceptNode({ data }: NodeProps<SemanticNode>) {
   );
 }
 
-function RoutedRelationshipEdge({
+function ClassicRelationshipEdge({
   id,
   sourceX,
   sourceY,
@@ -142,27 +136,18 @@ function RoutedRelationshipEdge({
   style,
   data,
 }: EdgeProps<SemanticEdge>) {
-  const laneOffset = typeof data?.laneOffset === 'number' ? data.laneOffset : 0;
-  const route = routedPath(sourceX, sourceY, targetX, targetY, laneOffset);
+  const curveOffset = typeof data?.curveOffset === 'number' ? data.curveOffset : 0;
+  const route = classicRelationshipPath({ x: sourceX, y: sourceY }, { x: targetX, y: targetY }, curveOffset);
   const label = typeof data?.label === 'string' ? data.label : '';
-  const faded = Boolean(data?.faded);
   const selected = Boolean(data?.selected);
 
   return (
     <>
-      <BaseEdge
-        id={id}
-        path={route.path}
-        markerEnd={markerEnd}
-        style={style}
-        interactionWidth={data?.dense ? 14 : 22}
-      />
+      <BaseEdge id={id} path={route.path} markerEnd={markerEnd} style={style} interactionWidth={data?.dense ? 14 : 22} />
       {label && (
         <EdgeLabelRenderer>
           <div
-            className={`graph-edge-label ${data?.isCrossCommunity ? 'graph-edge-label-cross' : ''} ${
-              selected ? 'graph-edge-label-selected' : ''
-            } ${faded ? 'graph-edge-label-faded' : ''}`}
+            className={`graph-edge-label ${selected ? 'graph-edge-label-selected' : ''}`}
             style={{
               transform: `translate(-50%, -50%) translate(${route.labelX}px, ${route.labelY}px)`,
             }}
@@ -180,22 +165,19 @@ const nodeTypes = {
 };
 
 const edgeTypes = {
-  semanticRelationship: memo(RoutedRelationshipEdge),
+  semanticRelationship: memo(ClassicRelationshipEdge),
 };
 
 export function GraphCanvas({
   graph,
   layout,
-  layoutMode = 'layered',
+  layoutMode = 'classic',
+  classicPositions = {},
   selectedConceptId,
   selectedRelationshipId,
-  selectedCommunityId = null,
-  focusedCommunityId = null,
-  communityLabels = {},
   onSelectConcept,
   onSelectRelationship,
-  onSelectCommunity,
-  onFocusCommunity,
+  onNodePositionChange,
   onPaneClick,
   variant = 'embedded',
   showGrid = true,
@@ -203,18 +185,29 @@ export function GraphCanvas({
 }: Props) {
   const workspace = variant === 'workspace';
   const resolvedLayout = useMemo(
-    () => layout ?? (graph ? buildGraphLayout(graph, layoutMode) : null),
-    [graph, layout, layoutMode],
+    () => layout ?? (graph ? buildGraphLayout(graph, layoutMode, { positions: classicPositions }) : null),
+    [classicPositions, graph, layout, layoutMode],
   );
-
-  const nodes = useMemo(
-    () => (resolvedLayout ? buildReactNodes(resolvedLayout, selectedConceptId, selectedCommunityId, workspace) : []),
-    [resolvedLayout, selectedConceptId, selectedCommunityId, workspace],
+  const layoutNodes = useMemo(
+    () => (resolvedLayout ? buildReactNodes(resolvedLayout, selectedConceptId, workspace) : []),
+    [resolvedLayout, selectedConceptId, workspace],
   );
+  const [flowNodes, setFlowNodes] = useState<SemanticNode[]>(layoutNodes);
   const edges = useMemo(
-    () => (resolvedLayout ? buildReactEdges(resolvedLayout, selectedRelationshipId, selectedCommunityId, workspace) : []),
-    [resolvedLayout, selectedRelationshipId, selectedCommunityId, workspace],
+    () => (resolvedLayout ? buildReactEdges(resolvedLayout, selectedRelationshipId, workspace) : []),
+    [resolvedLayout, selectedRelationshipId, workspace],
   );
+  const conceptByNodeId = useMemo(
+    () => new Map((graph?.nodes ?? []).map((concept) => [String(concept.id), concept])),
+    [graph],
+  );
+  const onNodesChange = useCallback((changes: NodeChange<SemanticNode>[]) => {
+    setFlowNodes((current) => applyNodeChanges(changes, current));
+  }, []);
+
+  useEffect(() => {
+    setFlowNodes(layoutNodes);
+  }, [layoutNodes]);
 
   if (!graph || !resolvedLayout) {
     return (
@@ -241,41 +234,34 @@ export function GraphCanvas({
       data-layout={resolvedLayout.mode}
     >
       <ReactFlow<SemanticNode, SemanticEdge>
-        nodes={nodes}
+        nodes={flowNodes}
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         fitView
-        fitViewOptions={{ padding: 0.18, duration: 220 }}
+        fitViewOptions={{ padding: 0.2, duration: 220 }}
         minZoom={0.18}
         maxZoom={1.7}
         snapToGrid
         snapGrid={[GRAPH_GRID_SIZE, GRAPH_GRID_SIZE]}
-        nodesDraggable
+        nodesDraggable={Boolean(onNodePositionChange)}
         nodesConnectable={false}
         edgesReconnectable={false}
         zoomOnScroll
         zoomOnPinch
         zoomOnDoubleClick={false}
         panOnScroll={false}
-        panOnScrollSpeed={0.34}
         panOnDrag
         nodeDragThreshold={4}
         onlyRenderVisibleElements={resolvedLayout.nodes.length > 120}
+        onNodesChange={onNodesChange}
         onPaneClick={onPaneClick}
         onNodeClick={(_, node) => onSelectConcept(Number(node.id))}
         onEdgeClick={(_, edge) => onSelectRelationship(Number(edge.id))}
+        onNodeDragStop={(_, node) => onNodePositionChange?.(Number(node.id), snapPoint(node.position))}
       >
-        <ViewportEffects layout={resolvedLayout} focusedCommunityId={focusedCommunityId} viewportRevision={viewportRevision} />
+        <ViewportEffects layoutSignature={resolvedLayout.signature} viewportRevision={viewportRevision} />
         <AdaptiveGrid showGrid={showGrid} workspace={workspace} />
-        <CommunityRegions
-          layout={resolvedLayout}
-          selectedCommunityId={selectedCommunityId}
-          focusedCommunityId={focusedCommunityId}
-          communityLabels={communityLabels}
-          onSelectCommunity={onSelectCommunity}
-          onFocusCommunity={onFocusCommunity}
-        />
         <MiniMap
           nodeStrokeWidth={2}
           pannable
@@ -291,7 +277,7 @@ export function GraphCanvas({
               : undefined
           }
           nodeColor={(node) => {
-            const concept = graph.nodes.find((item) => String(item.id) === node.id);
+            const concept = conceptByNodeId.get(node.id);
             return concept ? masteryTheme[masteryCategory(concept.mastery_score)].nodeBackground : '#ffffff';
           }}
         />
@@ -301,18 +287,12 @@ export function GraphCanvas({
   );
 }
 
-function buildReactNodes(
-  layout: GraphLayoutResult,
-  selectedConceptId: number | null,
-  selectedCommunityId: number | null,
-  workspace: boolean,
-): SemanticNode[] {
+function buildReactNodes(layout: GraphLayoutResult, selectedConceptId: number | null, workspace: boolean): SemanticNode[] {
   return layout.nodes.map((layoutNode) => {
     const concept = layoutNode.concept;
     const category = masteryCategory(concept.mastery_score);
     const theme = masteryTheme[category];
     const selected = selectedConceptId === concept.id;
-    const faded = Boolean(selectedCommunityId && layoutNode.communityId !== selectedCommunityId);
 
     return {
       id: String(concept.id),
@@ -321,24 +301,19 @@ function buildReactNodes(
       data: {
         concept,
         selected,
-        faded,
         nodeBackground: theme.nodeBackground,
         nodeBorder: selected ? (workspace ? '#f8f7f2' : '#22221f') : theme.nodeBorder,
         nodeShadow: selected
           ? workspace
-            ? '0 0 0 1px rgba(255,255,255,0.38), 0 20px 54px rgba(39, 116, 109, 0.35)'
+            ? '0 0 0 1px rgba(255,255,255,0.38), 0 18px 42px rgba(39, 116, 109, 0.28)'
             : '0 12px 30px rgba(34, 34, 31, 0.22)'
-          : workspace
-            ? '0 12px 34px rgba(4,6,8,0.42)'
-            : null,
+          : null,
       },
       style: {
         width: GRAPH_NODE_WIDTH,
         height: GRAPH_NODE_HEIGHT,
-        opacity: faded ? 0.28 : 1,
-        transition: 'opacity 140ms ease, filter 140ms ease',
       },
-      zIndex: selected ? 30 : faded ? 5 : 20,
+      zIndex: selected ? 30 : 20,
     };
   });
 }
@@ -346,23 +321,12 @@ function buildReactNodes(
 function buildReactEdges(
   layout: GraphLayoutResult,
   selectedRelationshipId: number | null,
-  selectedCommunityId: number | null,
   workspace: boolean,
 ): SemanticEdge[] {
   const dense = layout.relationships.length > 180;
   return layout.relationships.map((route) => {
     const relationship = route.relationship;
     const selected = selectedRelationshipId === relationship.id;
-    const touchesSelectedCommunity =
-      selectedCommunityId === null ||
-      route.sourceCommunityId === selectedCommunityId ||
-      route.targetCommunityId === selectedCommunityId;
-    const fullyInsideSelectedCommunity =
-      selectedCommunityId === null ||
-      (route.sourceCommunityId === selectedCommunityId && route.targetCommunityId === selectedCommunityId);
-    const faded = !touchesSelectedCommunity;
-    const clusterOpacity =
-      selectedCommunityId === null ? (route.isCrossCommunity && layout.mode === 'clustered' ? 0.64 : 0.9) : fullyInsideSelectedCommunity ? 1 : 0.32;
     const edgeColor = workspace ? workspaceEdgeColor(relationship.mastery_score) : masteryTheme[masteryCategory(relationship.mastery_score)].edge;
 
     return {
@@ -375,84 +339,61 @@ function buildReactEdges(
       markerEnd: { type: MarkerType.ArrowClosed, color: selected ? (workspace ? '#ffffff' : '#22221f') : edgeColor },
       style: {
         stroke: selected ? (workspace ? '#ffffff' : '#22221f') : edgeColor,
-        strokeWidth: selected ? 3.2 : route.isCrossCommunity ? 1.8 : 2.2,
-        opacity: selected ? 1 : faded ? 0.14 : clusterOpacity,
+        strokeWidth: selected ? 3.2 : 2.2,
+        opacity: selected ? 1 : 0.9,
       },
       data: {
-        label: relationship.relationship_type,
-        laneOffset: route.laneOffset,
+        label: dense && !selected ? '' : relationship.relationship_type,
+        curveOffset: route.curveOffset,
         selected,
-        faded,
         dense,
-        isCrossCommunity: route.isCrossCommunity,
       },
-      zIndex: selected ? 30 : route.isCrossCommunity ? 8 : 12,
+      zIndex: selected ? 30 : 12,
     };
   });
 }
 
 function AdaptiveGrid({ showGrid, workspace }: { showGrid: boolean; workspace: boolean }) {
-  const zoom = useStore((state) => state.transform[2]);
-
   if (!showGrid) return null;
 
-  const fineOpacity = workspace ? (zoom > 0.72 ? 0.62 : zoom > 0.42 ? 0.28 : 0) : 1;
-  const coarseOpacity = workspace ? (zoom > 0.72 ? 0.22 : 0.48) : 0;
-
   return (
-    <>
-      <Background
-        id="graph-grid-fine"
-        variant={BackgroundVariant.Lines}
-        gap={workspace ? GRAPH_GRID_SIZE : 26}
-        color={workspace ? '#2b373d' : '#d9d4c8'}
-        lineWidth={1}
-        bgColor={workspace ? '#090b0f' : undefined}
-        style={{ opacity: fineOpacity }}
-      />
-      {workspace && (
-        <Background
-          id="graph-grid-coarse"
-          variant={BackgroundVariant.Lines}
-          gap={GRAPH_GRID_SIZE * 5}
-          color="#40515a"
-          lineWidth={1}
-          style={{ opacity: coarseOpacity }}
-        />
-      )}
-    </>
+    <Background
+      id="graph-grid"
+      variant={BackgroundVariant.Lines}
+      gap={workspace ? GRAPH_GRID_SIZE : 26}
+      color={workspace ? '#2b373d' : '#d9d4c8'}
+      lineWidth={1}
+      bgColor={workspace ? '#090b0f' : undefined}
+      style={workspace ? workspaceGridStyle : undefined}
+    />
   );
 }
 
 function ViewportEffects({
-  layout,
-  focusedCommunityId,
+  layoutSignature,
   viewportRevision,
 }: {
-  layout: GraphLayoutResult;
-  focusedCommunityId: number | null;
+  layoutSignature: string;
   viewportRevision: number;
 }) {
-  const { fitBounds, fitView } = useReactFlow();
+  const { fitView } = useReactFlow();
   const previousSignature = useRef<string | null>(null);
+  const previousViewportRevision = useRef(viewportRevision);
 
   useEffect(() => {
-    const layoutChanged = previousSignature.current !== layout.signature;
-    previousSignature.current = layout.signature;
+    const layoutChanged = previousSignature.current !== layoutSignature;
+    const viewportRevisionChanged = previousViewportRevision.current !== viewportRevision;
+    previousSignature.current = layoutSignature;
+    previousViewportRevision.current = viewportRevision;
+
+    if (!layoutChanged && !viewportRevisionChanged) return;
 
     const frame = window.requestAnimationFrame(() => {
-      const focusedCommunity = layout.communities.find((community) => community.id === focusedCommunityId);
-      if (focusedCommunity) {
-        void fitBounds(focusedCommunity.bounds, { padding: 0.5, duration: 240 });
-        return;
-      }
-      if (layoutChanged || viewportRevision > 0) {
-        void fitView({ padding: 0.18, duration: 220 });
-      }
+      void fitView({ padding: 0.2, duration: 220 });
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [fitBounds, fitView, focusedCommunityId, layout, viewportRevision]);
+  }, [fitView, layoutSignature, viewportRevision]);
 
   return null;
 }
@@ -462,7 +403,7 @@ function AnimatedControls() {
 
   return (
     <Controls
-      fitViewOptions={{ padding: 0.18, duration: 220 }}
+      fitViewOptions={{ padding: 0.2, duration: 220 }}
       onZoomIn={() => {
         void zoomIn({ duration: 180 });
       }}
@@ -470,113 +411,10 @@ function AnimatedControls() {
         void zoomOut({ duration: 180 });
       }}
       onFitView={() => {
-        void fitView({ padding: 0.18, duration: 220 });
+        void fitView({ padding: 0.2, duration: 220 });
       }}
     />
   );
-}
-
-function CommunityRegions({
-  layout,
-  selectedCommunityId,
-  focusedCommunityId,
-  communityLabels,
-  onSelectCommunity,
-  onFocusCommunity,
-}: {
-  layout: GraphLayoutResult;
-  selectedCommunityId: number | null;
-  focusedCommunityId: number | null;
-  communityLabels: Record<string, string>;
-  onSelectCommunity?: (communityId: number) => void;
-  onFocusCommunity?: (communityId: number | null) => void;
-}) {
-  if (layout.mode !== 'clustered' || layout.communities.length === 0) return null;
-
-  return (
-    <ViewportPortal>
-      {layout.communities.map((community) => (
-        <CommunityRegion
-          key={community.stableKey}
-          community={community}
-          selected={selectedCommunityId === community.id}
-          focused={focusedCommunityId === community.id}
-          label={communityLabels[community.stableKey] || community.label}
-          onSelectCommunity={onSelectCommunity}
-          onFocusCommunity={onFocusCommunity}
-        />
-      ))}
-    </ViewportPortal>
-  );
-}
-
-function CommunityRegion({
-  community,
-  label,
-  selected,
-  focused,
-  onSelectCommunity,
-  onFocusCommunity,
-}: {
-  community: LayoutCommunity;
-  label: string;
-  selected: boolean;
-  focused: boolean;
-  onSelectCommunity?: (communityId: number) => void;
-  onFocusCommunity?: (communityId: number | null) => void;
-}) {
-  return (
-    <div
-      className={`graph-community-region ${selected ? 'graph-community-region-selected' : ''} ${
-        focused ? 'graph-community-region-focused' : ''
-      }`}
-      style={{
-        left: community.bounds.x,
-        top: community.bounds.y,
-        width: community.bounds.width,
-        height: community.bounds.height,
-      }}
-    >
-      <button
-        type="button"
-        className="graph-community-label"
-        onClick={(event) => {
-          event.stopPropagation();
-          onSelectCommunity?.(community.id);
-        }}
-        onDoubleClick={(event) => {
-          event.stopPropagation();
-          onFocusCommunity?.(community.id);
-        }}
-      >
-        <span>{label}</span>
-        <span>{community.nodeIds.length} concepts</span>
-      </button>
-    </div>
-  );
-}
-
-function routedPath(sourceX: number, sourceY: number, targetX: number, targetY: number, laneOffset: number) {
-  const dx = targetX - sourceX;
-  const dy = targetY - sourceY;
-  const distance = Math.max(1, Math.hypot(dx, dy));
-  const normalX = -dy / distance;
-  const normalY = dx / distance;
-  const controlDistance = Math.min(280, Math.max(90, distance * 0.36));
-  const controlOffsetX = normalX * laneOffset;
-  const controlOffsetY = normalY * laneOffset;
-  const control1X = sourceX + (dx / distance) * controlDistance + controlOffsetX;
-  const control1Y = sourceY + (dy / distance) * controlDistance + controlOffsetY;
-  const control2X = targetX - (dx / distance) * controlDistance + controlOffsetX;
-  const control2Y = targetY - (dy / distance) * controlDistance + controlOffsetY;
-  const labelX = (sourceX + targetX) / 2 + controlOffsetX;
-  const labelY = (sourceY + targetY) / 2 + controlOffsetY;
-
-  return {
-    path: `M ${sourceX},${sourceY} C ${control1X},${control1Y} ${control2X},${control2Y} ${targetX},${targetY}`,
-    labelX,
-    labelY,
-  };
 }
 
 function handleId(kind: 'source' | 'target', side: PortSide) {

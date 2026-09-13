@@ -4,22 +4,17 @@ import {
   ChevronLeft,
   ChevronRight,
   Crosshair,
-  Focus,
   GitFork,
   Link2,
   Map,
   Network,
   Plus,
+  RefreshCw,
   Search,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
-import {
-  graphLayoutLabels,
-  graphLayoutModes,
-  type GraphLayoutMode,
-  type LayoutCommunity,
-} from '../graph/layout';
+import { graphLayoutLabels, graphLayoutModes, type GraphLayoutMode } from '../graph/layout';
 
 export type GraphDestination = 'dashboard' | 'graph' | 'study' | 'reconstruction';
 
@@ -33,22 +28,15 @@ type Props = {
   error: string | null;
   showGrid: boolean;
   currentView: GraphDestination;
-  communities: LayoutCommunity[];
-  selectedCommunityId: number | null;
-  focusedCommunityId: number | null;
-  communityLabels: Record<string, string>;
   search: ReactNode;
   onCollapsedChange: (collapsed: boolean) => void;
   onDepthChange: (depth: number) => void;
   onLayoutModeChange: (mode: GraphLayoutMode) => void;
   onGridChange: (showGrid: boolean) => void;
-  onCommunitySelect: (communityId: number) => void;
-  onCommunityFocus: (communityId: number) => void;
-  onShowAllCommunities: () => void;
-  onCommunityLabelChange: (stableKey: string, label: string) => void;
   onOpenConcept: () => void;
   onOpenRelationship: () => void;
   onFitGraph: () => void;
+  onReorganize: () => void;
   onResetExpanded: () => void;
   onNavigate: (view: GraphDestination) => void;
 };
@@ -70,22 +58,15 @@ export function GraphToolRail({
   error,
   showGrid,
   currentView,
-  communities,
-  selectedCommunityId,
-  focusedCommunityId,
-  communityLabels,
   search,
   onCollapsedChange,
   onDepthChange,
   onLayoutModeChange,
   onGridChange,
-  onCommunitySelect,
-  onCommunityFocus,
-  onShowAllCommunities,
-  onCommunityLabelChange,
   onOpenConcept,
   onOpenRelationship,
   onFitGraph,
+  onReorganize,
   onResetExpanded,
   onNavigate,
 }: Props) {
@@ -103,6 +84,9 @@ export function GraphToolRail({
         </IconButton>
         <IconButton label="Fit Graph" onClick={onFitGraph}>
           <Crosshair />
+        </IconButton>
+        <IconButton label="Reorganize" onClick={onReorganize}>
+          <RefreshCw />
         </IconButton>
         <IconButton label="Open Sidebar" onClick={() => onCollapsedChange(false)}>
           <ChevronRight />
@@ -192,62 +176,15 @@ export function GraphToolRail({
           <Crosshair className="h-4 w-4" />
           Fit Graph
         </button>
+        <button type="button" onClick={onReorganize} className="graph-sidebar-button">
+          <RefreshCw className="h-4 w-4" />
+          Reorganize
+        </button>
         <button type="button" onClick={onResetExpanded} className="graph-sidebar-button">
           <GitFork className="h-4 w-4" />
           Reset Expanded
         </button>
       </section>
-
-      {layoutMode === 'clustered' && communities.length > 0 && (
-        <section className="space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <p className="graph-sidebar-label mb-0">Communities</p>
-            <button type="button" onClick={onShowAllCommunities} className="graph-sidebar-mini-button">
-              Show All
-            </button>
-          </div>
-          <div className="graph-community-list">
-            {communities.map((community) => {
-              const label = communityLabels[community.stableKey] ?? community.label;
-              const selected = selectedCommunityId === community.id;
-              const focused = focusedCommunityId === community.id;
-              return (
-                <div key={community.stableKey} className="graph-community-list-item">
-                  <button
-                    type="button"
-                    onClick={() => onCommunitySelect(community.id)}
-                    onDoubleClick={() => onCommunityFocus(community.id)}
-                    className={`graph-community-list-button ${selected ? 'graph-community-list-button-selected' : ''}`}
-                  >
-                    <span>{label}</span>
-                    <span>
-                      {community.nodeIds.length} nodes / {community.internalRelationshipCount} links
-                    </span>
-                  </button>
-                  <div className="flex gap-2">
-                    <input
-                      aria-label={`${community.label} display name`}
-                      value={communityLabels[community.stableKey] ?? ''}
-                      onChange={(event) => onCommunityLabelChange(community.stableKey, event.target.value)}
-                      placeholder={community.label}
-                      className="graph-community-name-input"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => onCommunityFocus(community.id)}
-                      className={`graph-community-focus-button ${focused ? 'graph-community-focus-button-active' : ''}`}
-                      title={`Focus ${label}`}
-                    >
-                      <Focus className="h-4 w-4" />
-                      <span className="sr-only">Focus {label}</span>
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
 
       <nav className="space-y-2">
         <p className="graph-sidebar-label">Navigate</p>

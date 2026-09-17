@@ -202,6 +202,17 @@ class ReviewResponse(BaseModel):
     relationship: RelationshipRead | None = None
 
 
+class KnowledgeEntryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    parent_id: int | None
+    name: str
+    entry_type: Literal["folder", "concept"]
+    concept_id: int | None
+    sort_order: int
+
+
 class GraphResponse(BaseModel):
     center_id: int
     depth: int

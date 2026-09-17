@@ -1,422 +1,201 @@
 import {
-  Background,
-  BackgroundVariant,
   BaseEdge,
-  Controls,
   EdgeLabelRenderer,
   Handle,
   MarkerType,
-  MiniMap,
   Position,
   ReactFlow,
-  applyNodeChanges,
   useReactFlow,
   type Edge,
   type EdgeProps,
   type Node,
-  type NodeChange,
   type NodeProps,
 } from '@xyflow/react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 
-import {
-  GRAPH_GRID_SIZE,
-  GRAPH_NODE_HEIGHT,
-  GRAPH_NODE_WIDTH,
-  buildGraphLayout,
-  classicRelationshipPath,
-  snapPoint,
-  type ClassicPositionStore,
-  type GraphLayoutMode,
-  type GraphLayoutResult,
-  type Point,
-  type PortSide,
-} from '../graph/layout';
-import { masteryCategory, masteryPercent, masteryTheme } from '../styles/mastery';
-import type { Concept, GraphResponse } from '../types';
+import { GRAPH_NODE_HEIGHT, GRAPH_NODE_WIDTH, computeForceLayout, graphSignature } from '../graph/layout';
+import type { GraphResponse } from '../types';
+
+export type StudyHidden = {
+  edgeId: number;
+  hiddenConceptId: number | null;
+  hideNode: boolean;
+  hideEdge: boolean;
+  revealed: boolean;
+};
 
 type Props = {
-  graph: GraphResponse | null;
-  layout?: GraphLayoutResult | null;
-  layoutMode?: GraphLayoutMode;
-  classicPositions?: ClassicPositionStore;
-  selectedConceptId: number | null;
-  selectedRelationshipId: number | null;
+  graph: GraphResponse;
+  rootId: number;
+  hidden: StudyHidden | null;
+  linkedConceptIds: Set<number>;
   onSelectConcept: (conceptId: number) => void;
-  onSelectRelationship: (relationshipId: number) => void;
-  onNodePositionChange?: (conceptId: number, position: Point) => void;
-  onPaneClick?: () => void;
-  variant?: 'embedded' | 'workspace';
-  showGrid?: boolean;
-  viewportRevision?: number;
 };
 
 type GraphNodeData = Record<string, unknown> & {
-  concept: Concept;
-  selected: boolean;
-  nodeBackground: string;
-  nodeBorder: string;
-  nodeShadow: string | null;
+  label: string;
+  isRoot: boolean;
+  isLinked: boolean;
+  isHidden: boolean;
+  isAnswer: boolean;
 };
 
 type GraphEdgeData = Record<string, unknown> & {
   label: string;
-  curveOffset: number;
-  selected: boolean;
-  dense: boolean;
+  path: string;
+  labelX: number;
+  labelY: number;
+  isHidden: boolean;
+  isAnswer: boolean;
 };
 
-type SemanticNode = Node<GraphNodeData, 'semanticConcept'>;
-type SemanticEdge = Edge<GraphEdgeData, 'semanticRelationship'>;
+type SemanticNode = Node<GraphNodeData, 'semanticNode'>;
+type SemanticEdge = Edge<GraphEdgeData, 'semanticEdge'>;
 
-const portPositions: Array<{ side: PortSide; position: Position }> = [
-  { side: 'top', position: Position.Top },
-  { side: 'right', position: Position.Right },
-  { side: 'bottom', position: Position.Bottom },
-  { side: 'left', position: Position.Left },
-];
-
-const workspaceGridStyle = { opacity: 0.36 } satisfies CSSProperties;
-
-function workspaceEdgeColor(score: number) {
-  const category = masteryCategory(score);
-  if (category === 'weak') return '#ff795f';
-  if (category === 'developing') return '#f5c542';
-  if (category === 'strong') return '#8fd98f';
-  return '#38d8cc';
+function prettifyRelationshipType(value: string) {
+  return value.replace(/_/g, ' ');
 }
 
 function GraphConceptNode({ data }: NodeProps<SemanticNode>) {
-  const style = {
-    background: data.nodeBackground,
-    borderColor: data.nodeBorder,
-    boxShadow: data.nodeShadow ?? undefined,
-  } satisfies CSSProperties;
+  const classes = ['proto-node'];
+  classes.push(data.isLinked ? 'proto-node-linked' : 'proto-node-description');
+  if (data.isRoot) classes.push('proto-node-root');
+  if (data.isHidden) classes.push('proto-node-hidden');
+  if (data.isAnswer) classes.push('proto-node-answer');
 
   return (
-    <div className={`graph-concept-node ${data.selected ? 'graph-concept-node-selected' : ''}`} style={style}>
-      {portPositions.map(({ side, position }) => (
-        <Handle
-          key={`source-${side}`}
-          type="source"
-          id={handleId('source', side)}
-          position={position}
-          isConnectable={false}
-          className="graph-node-handle"
-        />
-      ))}
-      {portPositions.map(({ side, position }) => (
-        <Handle
-          key={`target-${side}`}
-          type="target"
-          id={handleId('target', side)}
-          position={position}
-          isConnectable={false}
-          className="graph-node-handle"
-        />
-      ))}
-      <div className="truncate text-sm font-bold text-ink" title={data.concept.name}>
-        {data.concept.name}
-      </div>
-      <div className="flex items-center justify-between gap-2 text-xs text-ink/60">
-        <span className="truncate">{data.concept.concept_type}</span>
-        <span>{masteryPercent(data.concept.mastery_score)}</span>
-      </div>
+    <div className={classes.join(' ')}>
+      <Handle type="source" id="c" position={Position.Top} isConnectable={false} className="proto-node-handle" />
+      <Handle type="target" id="c" position={Position.Top} isConnectable={false} className="proto-node-handle" />
+      <span className="proto-node-label">{data.isHidden ? '???' : data.label}</span>
     </div>
   );
 }
 
-function ClassicRelationshipEdge({
-  id,
-  sourceX,
-  sourceY,
-  targetX,
-  targetY,
-  markerEnd,
-  style,
-  data,
-}: EdgeProps<SemanticEdge>) {
-  const curveOffset = typeof data?.curveOffset === 'number' ? data.curveOffset : 0;
-  const route = classicRelationshipPath({ x: sourceX, y: sourceY }, { x: targetX, y: targetY }, curveOffset);
+function SemanticRelationshipEdge({ id, markerEnd, style, data }: EdgeProps<SemanticEdge>) {
+  const path = typeof data?.path === 'string' ? data.path : '';
   const label = typeof data?.label === 'string' ? data.label : '';
-  const selected = Boolean(data?.selected);
+  const isHidden = Boolean(data?.isHidden);
+  const isAnswer = Boolean(data?.isAnswer);
 
   return (
     <>
-      <BaseEdge id={id} path={route.path} markerEnd={markerEnd} style={style} interactionWidth={data?.dense ? 14 : 22} />
-      {label && (
-        <EdgeLabelRenderer>
-          <div
-            className={`graph-edge-label ${selected ? 'graph-edge-label-selected' : ''}`}
-            style={{
-              transform: `translate(-50%, -50%) translate(${route.labelX}px, ${route.labelY}px)`,
-            }}
-          >
-            {label}
-          </div>
-        </EdgeLabelRenderer>
-      )}
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} interactionWidth={18} />
+      <EdgeLabelRenderer>
+        <div
+          className={`proto-edge-label ${isHidden ? 'proto-edge-label-hidden' : ''} ${isAnswer ? 'proto-edge-label-answer' : ''}`}
+          style={{
+            transform: `translate(-50%, -50%) translate(${data?.labelX ?? 0}px, ${data?.labelY ?? 0}px)`,
+          }}
+        >
+          {isHidden ? '???' : prettifyRelationshipType(label)}
+        </div>
+      </EdgeLabelRenderer>
     </>
   );
 }
 
-const nodeTypes = {
-  semanticConcept: memo(GraphConceptNode),
-};
+const nodeTypes = { semanticNode: memo(GraphConceptNode) };
+const edgeTypes = { semanticEdge: memo(SemanticRelationshipEdge) };
 
-const edgeTypes = {
-  semanticRelationship: memo(ClassicRelationshipEdge),
-};
+export function GraphCanvas({ graph, rootId, hidden, linkedConceptIds, onSelectConcept }: Props) {
+  const layout = useMemo(() => computeForceLayout(graph, rootId), [graph, rootId]);
+  const signature = useMemo(() => graphSignature(graph), [graph]);
 
-export function GraphCanvas({
-  graph,
-  layout,
-  layoutMode = 'classic',
-  classicPositions = {},
-  selectedConceptId,
-  selectedRelationshipId,
-  onSelectConcept,
-  onSelectRelationship,
-  onNodePositionChange,
-  onPaneClick,
-  variant = 'embedded',
-  showGrid = true,
-  viewportRevision = 0,
-}: Props) {
-  const workspace = variant === 'workspace';
-  const resolvedLayout = useMemo(
-    () => layout ?? (graph ? buildGraphLayout(graph, layoutMode, { positions: classicPositions }) : null),
-    [classicPositions, graph, layout, layoutMode],
-  );
-  const layoutNodes = useMemo(
-    () => (resolvedLayout ? buildReactNodes(resolvedLayout, selectedConceptId, workspace) : []),
-    [resolvedLayout, selectedConceptId, workspace],
-  );
-  const [flowNodes, setFlowNodes] = useState<SemanticNode[]>(layoutNodes);
-  const edges = useMemo(
-    () => (resolvedLayout ? buildReactEdges(resolvedLayout, selectedRelationshipId, workspace) : []),
-    [resolvedLayout, selectedRelationshipId, workspace],
-  );
-  const conceptByNodeId = useMemo(
-    () => new Map((graph?.nodes ?? []).map((concept) => [String(concept.id), concept])),
-    [graph],
-  );
-  const onNodesChange = useCallback((changes: NodeChange<SemanticNode>[]) => {
-    setFlowNodes((current) => applyNodeChanges(changes, current));
-  }, []);
+  const nodes: SemanticNode[] = useMemo(
+    () =>
+      layout.nodes.map((node) => {
+        const isHiddenNode = Boolean(hidden && !hidden.revealed && hidden.hideNode && node.conceptId === hidden.hiddenConceptId);
+        const isAnswerNode = Boolean(hidden && hidden.revealed && hidden.hideNode && node.conceptId === hidden.hiddenConceptId);
 
-  useEffect(() => {
-    setFlowNodes(layoutNodes);
-  }, [layoutNodes]);
+        return {
+          id: node.id,
+          type: 'semanticNode',
+          position: node.position,
+          draggable: false,
+          data: {
+            label: node.label,
+            isRoot: node.isRoot,
+            isLinked: linkedConceptIds.has(node.conceptId),
+            isHidden: isHiddenNode,
+            isAnswer: isAnswerNode,
+          },
+          style: { width: GRAPH_NODE_WIDTH, height: GRAPH_NODE_HEIGHT },
+          zIndex: node.isRoot ? 20 : 10,
+        };
+      }),
+    [layout.nodes, hidden, linkedConceptIds],
+  );
 
-  if (!graph || !resolvedLayout) {
-    return (
-      <div
-        className={
-          workspace
-            ? 'flex h-full min-h-0 items-center justify-center bg-transparent text-sm text-white/[0.62]'
-            : 'flex h-full min-h-[520px] items-center justify-center rounded-md border border-dashed border-line bg-panel text-sm text-ink/60'
-        }
-      >
-        Select a concept to load its local graph.
-      </div>
-    );
-  }
+  const edges: SemanticEdge[] = useMemo(
+    () =>
+      layout.edges.map((edge) => {
+        const isHiddenEdge = Boolean(hidden && !hidden.revealed && hidden.hideEdge && edge.relationshipId === hidden.edgeId);
+        const isAnswerEdge = Boolean(hidden && hidden.revealed && hidden.hideEdge && edge.relationshipId === hidden.edgeId);
+
+        return {
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
+          sourceHandle: 'c',
+          targetHandle: 'c',
+          type: 'semanticEdge',
+          markerEnd: { type: MarkerType.ArrowClosed, color: 'rgba(248,247,242,0.45)', width: 14, height: 14 },
+          style: { stroke: 'rgba(248,247,242,0.3)', strokeWidth: 1.4 },
+          data: {
+            label: edge.relationshipType,
+            path: edge.path,
+            labelX: edge.labelX,
+            labelY: edge.labelY,
+            isHidden: isHiddenEdge,
+            isAnswer: isAnswerEdge,
+          },
+        };
+      }),
+    [layout.edges, hidden],
+  );
 
   return (
-    <div
-      className={
-        workspace
-          ? 'graph-shell graph-shell-workspace h-full min-h-0 overflow-hidden bg-transparent'
-          : 'graph-shell h-full min-h-[560px] overflow-hidden rounded-md border border-line bg-panel'
-      }
-      data-testid={workspace ? 'graph-workspace-canvas' : 'graph-canvas'}
-      data-layout={resolvedLayout.mode}
-    >
+    <div className="proto-canvas" data-testid="graph-canvas">
       <ReactFlow<SemanticNode, SemanticEdge>
-        nodes={flowNodes}
+        nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         fitView
-        fitViewOptions={{ padding: 0.2, duration: 220 }}
-        minZoom={0.18}
-        maxZoom={1.7}
-        snapToGrid
-        snapGrid={[GRAPH_GRID_SIZE, GRAPH_GRID_SIZE]}
-        nodesDraggable={Boolean(onNodePositionChange)}
+        fitViewOptions={{ padding: 0.28, duration: 200 }}
+        minZoom={0.3}
+        maxZoom={1.6}
+        nodesDraggable={false}
         nodesConnectable={false}
         edgesReconnectable={false}
+        panOnScroll={false}
+        panOnDrag
         zoomOnScroll
         zoomOnPinch
         zoomOnDoubleClick={false}
-        panOnScroll={false}
-        panOnDrag
-        nodeDragThreshold={4}
-        onlyRenderVisibleElements={resolvedLayout.nodes.length > 120}
-        onNodesChange={onNodesChange}
-        onPaneClick={onPaneClick}
+        proOptions={{ hideAttribution: true }}
         onNodeClick={(_, node) => onSelectConcept(Number(node.id))}
-        onEdgeClick={(_, edge) => onSelectRelationship(Number(edge.id))}
-        onNodeDragStop={(_, node) => onNodePositionChange?.(Number(node.id), snapPoint(node.position))}
       >
-        <ViewportEffects layoutSignature={resolvedLayout.signature} viewportRevision={viewportRevision} />
-        <AdaptiveGrid showGrid={showGrid} workspace={workspace} />
-        <MiniMap
-          nodeStrokeWidth={2}
-          pannable
-          zoomable
-          maskColor={workspace ? 'rgba(9,11,15,0.68)' : undefined}
-          style={
-            workspace
-              ? {
-                  background: 'rgba(17,22,26,0.78)',
-                  border: '1px solid rgba(255,255,255,0.12)',
-                  borderRadius: 8,
-                }
-              : undefined
-          }
-          nodeColor={(node) => {
-            const concept = conceptByNodeId.get(node.id);
-            return concept ? masteryTheme[masteryCategory(concept.mastery_score)].nodeBackground : '#ffffff';
-          }}
-        />
-        <AnimatedControls />
+        <FitViewOnChange signature={`${signature}|${hidden ? `${hidden.edgeId}:${hidden.revealed}` : 'none'}`} />
       </ReactFlow>
     </div>
   );
 }
 
-function buildReactNodes(layout: GraphLayoutResult, selectedConceptId: number | null, workspace: boolean): SemanticNode[] {
-  return layout.nodes.map((layoutNode) => {
-    const concept = layoutNode.concept;
-    const category = masteryCategory(concept.mastery_score);
-    const theme = masteryTheme[category];
-    const selected = selectedConceptId === concept.id;
-
-    return {
-      id: String(concept.id),
-      type: 'semanticConcept',
-      position: layoutNode.position,
-      data: {
-        concept,
-        selected,
-        nodeBackground: theme.nodeBackground,
-        nodeBorder: selected ? (workspace ? '#f8f7f2' : '#22221f') : theme.nodeBorder,
-        nodeShadow: selected
-          ? workspace
-            ? '0 0 0 1px rgba(255,255,255,0.38), 0 18px 42px rgba(39, 116, 109, 0.28)'
-            : '0 12px 30px rgba(34, 34, 31, 0.22)'
-          : null,
-      },
-      style: {
-        width: GRAPH_NODE_WIDTH,
-        height: GRAPH_NODE_HEIGHT,
-      },
-      zIndex: selected ? 30 : 20,
-    };
-  });
-}
-
-function buildReactEdges(
-  layout: GraphLayoutResult,
-  selectedRelationshipId: number | null,
-  workspace: boolean,
-): SemanticEdge[] {
-  const dense = layout.relationships.length > 180;
-  return layout.relationships.map((route) => {
-    const relationship = route.relationship;
-    const selected = selectedRelationshipId === relationship.id;
-    const edgeColor = workspace ? workspaceEdgeColor(relationship.mastery_score) : masteryTheme[masteryCategory(relationship.mastery_score)].edge;
-
-    return {
-      id: String(relationship.id),
-      source: String(relationship.source_concept_id),
-      target: String(relationship.target_concept_id),
-      sourceHandle: handleId('source', route.sourceSide),
-      targetHandle: handleId('target', route.targetSide),
-      type: 'semanticRelationship',
-      markerEnd: { type: MarkerType.ArrowClosed, color: selected ? (workspace ? '#ffffff' : '#22221f') : edgeColor },
-      style: {
-        stroke: selected ? (workspace ? '#ffffff' : '#22221f') : edgeColor,
-        strokeWidth: selected ? 3.2 : 2.2,
-        opacity: selected ? 1 : 0.9,
-      },
-      data: {
-        label: dense && !selected ? '' : relationship.relationship_type,
-        curveOffset: route.curveOffset,
-        selected,
-        dense,
-      },
-      zIndex: selected ? 30 : 12,
-    };
-  });
-}
-
-function AdaptiveGrid({ showGrid, workspace }: { showGrid: boolean; workspace: boolean }) {
-  if (!showGrid) return null;
-
-  return (
-    <Background
-      id="graph-grid"
-      variant={BackgroundVariant.Lines}
-      gap={workspace ? GRAPH_GRID_SIZE : 26}
-      color={workspace ? '#2b373d' : '#d9d4c8'}
-      lineWidth={1}
-      bgColor={workspace ? '#090b0f' : undefined}
-      style={workspace ? workspaceGridStyle : undefined}
-    />
-  );
-}
-
-function ViewportEffects({
-  layoutSignature,
-  viewportRevision,
-}: {
-  layoutSignature: string;
-  viewportRevision: number;
-}) {
+function FitViewOnChange({ signature }: { signature: string }) {
   const { fitView } = useReactFlow();
-  const previousSignature = useRef<string | null>(null);
-  const previousViewportRevision = useRef(viewportRevision);
+  const previous = useRef<string | null>(null);
 
   useEffect(() => {
-    const layoutChanged = previousSignature.current !== layoutSignature;
-    const viewportRevisionChanged = previousViewportRevision.current !== viewportRevision;
-    previousSignature.current = layoutSignature;
-    previousViewportRevision.current = viewportRevision;
-
-    if (!layoutChanged && !viewportRevisionChanged) return;
+    if (previous.current === signature) return;
+    previous.current = signature;
 
     const frame = window.requestAnimationFrame(() => {
-      void fitView({ padding: 0.2, duration: 220 });
+      void fitView({ padding: 0.28, duration: 200 });
     });
-
     return () => window.cancelAnimationFrame(frame);
-  }, [fitView, layoutSignature, viewportRevision]);
+  }, [fitView, signature]);
 
   return null;
-}
-
-function AnimatedControls() {
-  const { fitView, zoomIn, zoomOut } = useReactFlow();
-
-  return (
-    <Controls
-      fitViewOptions={{ padding: 0.2, duration: 220 }}
-      onZoomIn={() => {
-        void zoomIn({ duration: 180 });
-      }}
-      onZoomOut={() => {
-        void zoomOut({ duration: 180 });
-      }}
-      onFitView={() => {
-        void fitView({ padding: 0.2, duration: 220 });
-      }}
-    />
-  );
-}
-
-function handleId(kind: 'source' | 'target', side: PortSide) {
-  return `${kind}-${side}`;
 }

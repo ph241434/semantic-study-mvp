@@ -1,412 +1,286 @@
-import { X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
 
 import { api } from '../api/client';
-import { ConceptForm } from '../components/ConceptForm';
-import { DetailPanel } from '../components/DetailPanel';
-import { GraphCanvas } from '../components/GraphCanvas';
-import { GraphToolRail, type GraphDestination } from '../components/GraphToolRail';
-import { RelationshipForm } from '../components/RelationshipForm';
-import { SearchBox } from '../components/SearchBox';
-import {
-  CLASSIC_LAYOUT_STORAGE_KEY,
-  buildGraphLayout,
-  classicPositionStoresEqual,
-  ensureClassicPositions,
-  graphLayoutModes,
-  reorganizeClassicPositions,
-  sanitizeClassicPositionStore,
-  updateClassicPosition,
-  type ClassicPositionStore,
-  type GraphLayoutMode,
-  type Point,
-} from '../graph/layout';
-import type { Concept, GraphResponse, Question, Relationship } from '../types';
+import { GraphCanvas, type StudyHidden } from '../components/GraphCanvas';
+import { isLeafGraph } from '../graph/layout';
+import type { FilesystemBreadcrumbSegment, GraphResponse, Relationship, TrailEntry } from '../types';
 
-type Props = {
-  concepts: Concept[];
-  relationships: Relationship[];
-  questions: Question[];
-  selectedConceptId: number | null;
-  selectedRelationshipId: number | null;
-  catalogLoading?: boolean;
-  catalogError?: string | null;
-  currentView: GraphDestination;
-  onChangeView: (view: GraphDestination) => void;
-  onSelectConcept: (conceptId: number) => void;
-  onSelectRelationship: (relationshipId: number | null) => void;
-  onCatalogChanged: () => Promise<void>;
-  onStudyQuestion: (question: Question) => void;
+type Mode = 'explore' | 'study';
+type PromptType = 'node' | 'relationship' | 'structural';
+
+type StudyPrompt = {
+  edge: Relationship;
+  type: PromptType;
+  hiddenConceptId: number;
+  prompt: string;
 };
 
-type QuickPanel = 'concept' | 'relationship' | null;
+type DescriptionPopover = { id: number; name: string; description: string };
 
-const SIDEBAR_COLLAPSED_KEY = 'semantic-study.graphSidebarCollapsed';
-const GRID_VISIBLE_KEY = 'semantic-study.graphGridVisible';
-const GRAPH_LAYOUT_KEY = 'semantic-study.graphLayoutMode';
+type Props = {
+  trail: TrailEntry[];
+  filesystemBreadcrumb: FilesystemBreadcrumbSegment[];
+  linkedConceptIds: Set<number>;
+  onTrailChange: (trail: TrailEntry[]) => void;
+  onExitToFilesystem: (folderId: number | null) => void;
+};
+
+function prettifyType(value: string) {
+  return value.replace(/_/g, ' ');
+}
+
+function buildPrompts(graph: GraphResponse, rootId: number, nameById: Map<number, string>): StudyPrompt[] {
+  const rootLabel = nameById.get(rootId) ?? 'this concept';
+  const types: PromptType[] = ['node', 'relationship', 'structural'];
+
+  return graph.relationships.map((edge, index) => {
+    const type = types[index % types.length];
+    const rootIsSource = edge.source_concept_id === rootId;
+    const hiddenConceptId = rootIsSource ? edge.target_concept_id : edge.source_concept_id;
+    const relationshipLabel = prettifyType(edge.relationship_type);
+
+    let prompt: string;
+    if (type === 'relationship') {
+      const sourceLabel = nameById.get(edge.source_concept_id) ?? 'concept';
+      const targetLabel = nameById.get(edge.target_concept_id) ?? 'concept';
+      prompt = `${sourceLabel} → ? → ${targetLabel}`;
+    } else if (type === 'structural') {
+      prompt = `${rootLabel} connects to another concept here.`;
+    } else {
+      prompt = rootIsSource
+        ? `${rootLabel} → ${relationshipLabel} → ?`
+        : `? → ${relationshipLabel} → ${rootLabel}`;
+    }
+
+    return { edge, type, hiddenConceptId, prompt };
+  });
+}
+
+function questionFor(type: PromptType): string {
+  if (type === 'relationship') return 'What is the relationship between these concepts?';
+  if (type === 'structural') return 'What other concept is directly involved?';
+  return 'Which concept completes this relationship?';
+}
+
+function answerFor(prompt: StudyPrompt, nameById: Map<number, string>): string {
+  if (prompt.type === 'relationship') return prettifyType(prompt.edge.relationship_type);
+  const name = nameById.get(prompt.hiddenConceptId) ?? 'Unknown concept';
+  return prompt.type === 'structural' ? `${name} — ${prettifyType(prompt.edge.relationship_type)}` : name;
+}
 
 export function GraphPage({
-  concepts,
-  relationships,
-  questions,
-  selectedConceptId,
-  selectedRelationshipId,
-  catalogLoading = false,
-  catalogError = null,
-  currentView,
-  onChangeView,
-  onSelectConcept,
-  onSelectRelationship,
-  onCatalogChanged,
-  onStudyQuestion,
+  trail,
+  filesystemBreadcrumb,
+  linkedConceptIds,
+  onTrailChange,
+  onExitToFilesystem,
 }: Props) {
-  const [depth, setDepth] = useState(1);
+  const rootId = trail[trail.length - 1].id;
+
   const [graph, setGraph] = useState<GraphResponse | null>(null);
-  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
-  const [quickPanel, setQuickPanel] = useState<QuickPanel>(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useBooleanPreference(SIDEBAR_COLLAPSED_KEY, false);
-  const [showGrid, setShowGrid] = useBooleanPreference(GRID_VISIBLE_KEY, true);
-  const [layoutMode, setLayoutMode] = useLayoutModePreference(GRAPH_LAYOUT_KEY, 'classic');
-  const [classicPositions, setClassicPositions] = useClassicPositionPreference(CLASSIC_LAYOUT_STORAGE_KEY);
-  const [inspectorOpen, setInspectorOpen] = useState(Boolean(selectedConceptId || selectedRelationshipId));
-  const [viewportRevision, setViewportRevision] = useState(0);
+  const [mode, setMode] = useState<Mode>('explore');
+  const [studyIndex, setStudyIndex] = useState(0);
+  const [revealed, setRevealed] = useState(false);
+  const [descriptionPopover, setDescriptionPopover] = useState<DescriptionPopover | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const selectedConcept = concepts.find((concept) => concept.id === selectedConceptId) ?? null;
-  const selectedRelationship = relationships.find((relationship) => relationship.id === selectedRelationshipId) ?? null;
-  const detailConcept = selectedRelationship ? null : selectedConcept;
-  const graphLayout = useMemo(
-    () => (graph ? buildGraphLayout(graph, layoutMode, { positions: classicPositions }) : null),
-    [classicPositions, graph, layoutMode],
-  );
-
   useEffect(() => {
-    if (!selectedConceptId) {
-      setGraph(null);
-      return;
-    }
-
     let active = true;
     setLoading(true);
     setError(null);
 
-    Promise.all([api.graph(selectedConceptId, depth), ...Array.from(expandedIds).map((id) => api.graph(id, 1))])
-      .then((graphs) => {
+    api
+      .graph(rootId, 1)
+      .then((response) => {
         if (!active) return;
-        const merged = mergeGraphs(graphs, selectedConceptId, depth);
-        setGraph(merged);
+        setGraph(response);
+        setStudyIndex(0);
+        setRevealed(false);
+        setDescriptionPopover(null);
+        if (isLeafGraph(response)) setMode('explore');
       })
       .catch((err) => {
-        if (active) setError(err instanceof Error ? err.message : 'Could not load graph');
+        if (active) setError(err instanceof Error ? err.message : 'Could not load this concept');
       })
-      .finally(() => active && setLoading(false));
+      .finally(() => {
+        if (active) setLoading(false);
+      });
 
     return () => {
       active = false;
     };
-  }, [selectedConceptId, depth, expandedIds]);
+  }, [rootId]);
 
-  useEffect(() => {
-    if (!graph) return;
+  const nameById = useMemo(() => {
+    const map = new Map<number, string>();
+    graph?.nodes.forEach((node) => map.set(node.id, node.name));
+    return map;
+  }, [graph]);
 
-    setClassicPositions((current) => {
-      const ensured = ensureClassicPositions(graph, current).positions;
-      return classicPositionStoresEqual(current, ensured) ? current : ensured;
-    });
-  }, [graph, setClassicPositions]);
+  const isLeaf = graph ? isLeafGraph(graph) : false;
+  const rootConcept = graph?.nodes.find((node) => node.id === rootId) ?? null;
 
-  useEffect(() => {
-    if (selectedConceptId || selectedRelationshipId) {
-      setInspectorOpen(true);
-    }
-  }, [selectedConceptId, selectedRelationshipId]);
+  const prompts = useMemo(
+    () => (graph && !isLeaf ? buildPrompts(graph, rootId, nameById) : []),
+    [graph, rootId, isLeaf, nameById],
+  );
+  const activePrompt = mode === 'study' ? (prompts[studyIndex] ?? null) : null;
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (isEditableTarget(event.target)) return;
-      if (event.key === 'Escape') {
-        if (quickPanel) {
-          setQuickPanel(null);
-          return;
-        }
-        if (inspectorOpen) {
-          closeInspector();
-        }
+  const hidden: StudyHidden | null = activePrompt
+    ? {
+        edgeId: activePrompt.edge.id,
+        hiddenConceptId: activePrompt.type === 'relationship' ? null : activePrompt.hiddenConceptId,
+        hideNode: activePrompt.type !== 'relationship',
+        hideEdge: activePrompt.type !== 'node',
+        revealed,
       }
-    }
+    : null;
 
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [inspectorOpen, quickPanel]);
-
-  const graphLabel = useMemo(() => {
-    if (!selectedConcept) return 'No concept selected';
-    return `${selectedConcept.name} + depth ${depth}`;
-  }, [depth, selectedConcept]);
-
-  function setSidebarState(collapsed: boolean) {
-    setSidebarCollapsed(collapsed);
-    setViewportRevision((revision) => revision + 1);
+  function navigateToTrailIndex(index: number) {
+    if (index === trail.length - 1) return;
+    onTrailChange(trail.slice(0, index + 1));
   }
 
-  function selectConceptFromGraph(conceptId: number) {
-    onSelectRelationship(null);
-    onSelectConcept(conceptId);
-    setInspectorOpen(true);
-  }
-
-  function selectRelationshipFromGraph(relationshipId: number) {
-    onSelectRelationship(relationshipId);
-    setInspectorOpen(true);
-  }
-
-  function closeInspector() {
-    setInspectorOpen(false);
-    onSelectRelationship(null);
-  }
-
-  function saveClassicPosition(conceptId: number, position: Point) {
-    setClassicPositions((current) => updateClassicPosition(current, conceptId, position));
-  }
-
-  function reorganizeClassicGraph() {
+  function handleSelectConcept(conceptId: number) {
     if (!graph) return;
+    if (hidden && !hidden.revealed && hidden.hideNode && hidden.hiddenConceptId === conceptId) {
+      setRevealed(true);
+      return;
+    }
+    if (conceptId === rootId) return;
+    const concept = graph.nodes.find((node) => node.id === conceptId);
+    if (!concept) return;
 
-    const nextVisiblePositions = reorganizeClassicPositions(graph);
-    setClassicPositions((current) => ({
-      ...current,
-      ...nextVisiblePositions,
-    }));
-    setViewportRevision((revision) => revision + 1);
+    if (linkedConceptIds.has(conceptId)) {
+      onTrailChange([...trail, { id: concept.id, name: concept.name }]);
+    } else {
+      setDescriptionPopover({ id: concept.id, name: concept.name, description: concept.description });
+    }
   }
 
-  async function conceptCreated(concept: Concept) {
-    await onCatalogChanged();
-    onSelectRelationship(null);
-    onSelectConcept(concept.id);
-    setQuickPanel(null);
-    setInspectorOpen(true);
+  function changeMode(nextMode: Mode) {
+    setMode(nextMode);
+    setStudyIndex(0);
+    setRevealed(false);
   }
 
-  async function relationshipCreated(relationship: Relationship) {
-    await onCatalogChanged();
-    onSelectRelationship(relationship.id);
-    onSelectConcept(relationship.source_concept_id);
-    setQuickPanel(null);
-    setInspectorOpen(true);
-  }
-
-  async function relationshipDeleted() {
-    onSelectRelationship(null);
-    setInspectorOpen(false);
-    await onCatalogChanged();
-  }
-
-  function changeDepth(nextDepth: number) {
-    setDepth(nextDepth);
-    setViewportRevision((revision) => revision + 1);
-  }
-
-  function changeLayoutMode(nextMode: GraphLayoutMode) {
-    setLayoutMode(nextMode);
-    setViewportRevision((revision) => revision + 1);
+  function handleNext() {
+    if (prompts.length === 0) return;
+    setStudyIndex((index) => (index + 1) % prompts.length);
+    setRevealed(false);
   }
 
   return (
-    <div
-      className={`graph-workspace${sidebarCollapsed ? ' graph-workspace-sidebar-collapsed' : ''}${
-        inspectorOpen ? ' graph-workspace-inspector-open' : ''
-      }`}
-      data-testid="graph-workspace"
-    >
-      <div className="absolute inset-0">
-        <GraphCanvas
-          graph={graph}
-          layout={graphLayout}
-          layoutMode={layoutMode}
-          classicPositions={classicPositions}
-          selectedConceptId={selectedConceptId}
-          selectedRelationshipId={selectedRelationshipId}
-          variant="workspace"
-          showGrid={showGrid}
-          viewportRevision={viewportRevision}
-          onSelectConcept={selectConceptFromGraph}
-          onSelectRelationship={selectRelationshipFromGraph}
-          onNodePositionChange={saveClassicPosition}
-          onPaneClick={closeInspector}
-        />
-      </div>
+    <div className="proto-app">
+      <header className="proto-topbar">
+        <nav className="proto-breadcrumb" aria-label="Breadcrumb" data-testid="graph-breadcrumb">
+          {filesystemBreadcrumb.map((segment, index) => (
+            <span key={`fs-${segment.id ?? 'root'}-${index}`} className="proto-breadcrumb-segment">
+              {index > 0 && <span className="proto-breadcrumb-separator">{'›'}</span>}
+              <button type="button" className="proto-breadcrumb-item" onClick={() => onExitToFilesystem(segment.id)}>
+                {segment.name}
+              </button>
+            </span>
+          ))}
+          {trail.map((entry, index) => (
+            <span key={`trail-${entry.id}-${index}`} className="proto-breadcrumb-segment">
+              <span className="proto-breadcrumb-separator">{'›'}</span>
+              <button
+                type="button"
+                className={`proto-breadcrumb-item${index === trail.length - 1 ? ' proto-breadcrumb-item-current' : ''}`}
+                onClick={() => navigateToTrailIndex(index)}
+                disabled={index === trail.length - 1}
+              >
+                {entry.name}
+              </button>
+            </span>
+          ))}
+        </nav>
 
-      <GraphToolRail
-        collapsed={sidebarCollapsed}
-        depth={depth}
-        layoutMode={layoutMode}
-        graphLabel={graphLabel}
-        nodeCount={graph?.nodes.length ?? 0}
-        loading={catalogLoading || loading}
-        error={catalogError ?? error}
-        showGrid={showGrid}
-        currentView={currentView}
-        search={
-          <SearchBox
-            variant="dark"
-            onSelect={(concept) => {
-              onSelectRelationship(null);
-              onSelectConcept(concept.id);
-              setInspectorOpen(true);
-              setViewportRevision((revision) => revision + 1);
-            }}
-          />
-        }
-        onCollapsedChange={setSidebarState}
-        onDepthChange={changeDepth}
-        onLayoutModeChange={changeLayoutMode}
-        onGridChange={setShowGrid}
-        onOpenConcept={() => setQuickPanel('concept')}
-        onOpenRelationship={() => setQuickPanel('relationship')}
-        onFitGraph={() => setViewportRevision((revision) => revision + 1)}
-        onReorganize={reorganizeClassicGraph}
-        onResetExpanded={() => setExpandedIds(new Set())}
-        onNavigate={onChangeView}
-      />
-
-      {quickPanel && (
-        <FloatingPanel title={quickPanel === 'concept' ? 'Add Concept' : 'Add Relationship'} onClose={() => setQuickPanel(null)}>
-          {quickPanel === 'concept' ? (
-            <ConceptForm onCreated={conceptCreated} />
-          ) : (
-            <RelationshipForm concepts={concepts} selectedConceptId={selectedConceptId} onCreated={relationshipCreated} />
-          )}
-        </FloatingPanel>
-      )}
-
-      {inspectorOpen && (detailConcept || selectedRelationship) && (
-        <div className="graph-inspector-panel" data-testid="graph-inspector">
-          <button type="button" onClick={closeInspector} className="graph-inspector-close" title="Close Inspector">
-            <X className="h-4 w-4" />
-            <span className="sr-only">Close Inspector</span>
+        <div className="proto-mode-toggle" role="group" aria-label="Mode">
+          <button
+            type="button"
+            className={`proto-mode-button${mode === 'explore' ? ' proto-mode-button-active' : ''}`}
+            onClick={() => changeMode('explore')}
+          >
+            Explore
           </button>
-          <DetailPanel
-            concept={detailConcept}
-            relationship={selectedRelationship}
-            relationships={relationships}
-            questions={questions}
-            concepts={concepts}
-            onConceptSaved={async (concept) => {
-              await onCatalogChanged();
-              onSelectConcept(concept.id);
-            }}
-            onRelationshipSaved={async (relationship) => {
-              await onCatalogChanged();
-              onSelectRelationship(relationship.id);
-            }}
-            onRelationshipDeleted={relationshipDeleted}
-            onStudyQuestion={onStudyQuestion}
-            onExpandConcept={(conceptId) => {
-              setExpandedIds((current) => new Set(current).add(conceptId));
-            }}
+          <button
+            type="button"
+            className={`proto-mode-button${mode === 'study' ? ' proto-mode-button-active' : ''}`}
+            onClick={() => changeMode('study')}
+            disabled={isLeaf || prompts.length === 0}
+            title={isLeaf || prompts.length === 0 ? 'Nothing to retrieve for this concept' : undefined}
+          >
+            Study
+          </button>
+        </div>
+      </header>
+
+      <main className="proto-main">
+        {error && (
+          <p className="proto-status proto-status-error" data-testid="graph-error">
+            {error}
+          </p>
+        )}
+        {!error && loading && (
+          <p className="proto-status" data-testid="graph-loading">
+            Loading…
+          </p>
+        )}
+        {!error && !loading && graph && isLeaf && rootConcept && (
+          <div className="proto-leaf" data-testid="graph-leaf">
+            <h1 className="proto-leaf-title">{rootConcept.name}</h1>
+            <p className="proto-leaf-desc">{rootConcept.description || 'No description yet.'}</p>
+          </div>
+        )}
+        {!error && !loading && graph && !isLeaf && (
+          <GraphCanvas
+            graph={graph}
+            rootId={rootId}
+            hidden={hidden}
+            linkedConceptIds={linkedConceptIds}
+            onSelectConcept={handleSelectConcept}
           />
+        )}
+
+        {descriptionPopover && (
+          <div className="proto-description-panel" data-testid="graph-description-panel">
+            <div className="proto-description-panel-header">
+              <h2>{descriptionPopover.name}</h2>
+              <button
+                type="button"
+                className="proto-description-panel-close"
+                onClick={() => setDescriptionPopover(null)}
+                aria-label="Close"
+              >
+                {'×'}
+              </button>
+            </div>
+            <p>{descriptionPopover.description || 'No description yet.'}</p>
+          </div>
+        )}
+      </main>
+
+      {mode === 'study' && activePrompt && (
+        <div className="proto-study-bar" data-testid="graph-study-bar">
+          <div className="proto-study-text">
+            <p className="proto-study-question">{questionFor(activePrompt.type)}</p>
+            <p className="proto-study-prompt" data-testid="graph-study-prompt">
+              {revealed ? answerFor(activePrompt, nameById) : activePrompt.prompt}
+            </p>
+          </div>
+          <div className="proto-study-actions">
+            <button type="button" className="proto-btn" onClick={() => setRevealed(true)} disabled={revealed} data-testid="graph-reveal">
+              Reveal
+            </button>
+            <button type="button" className="proto-btn" onClick={handleNext} data-testid="graph-next">
+              Next
+            </button>
+          </div>
         </div>
       )}
     </div>
-  );
-}
-
-function FloatingPanel({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
-  return (
-    <div className="graph-floating-backdrop" role="presentation">
-      <section className="graph-floating-panel" role="dialog" aria-modal="true" aria-label={title}>
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-base font-bold text-white">{title}</h2>
-          <button type="button" onClick={onClose} className="graph-icon-button" title="Close">
-            <X className="h-4 w-4" />
-            <span className="sr-only">Close</span>
-          </button>
-        </div>
-        {children}
-      </section>
-    </div>
-  );
-}
-
-function mergeGraphs(graphs: GraphResponse[], centerId: number, depth: number): GraphResponse {
-  const nodeMap = new Map<number, Concept>();
-  const relationshipMap = new Map<number, Relationship>();
-  graphs.forEach((graph) => {
-    graph.nodes.forEach((node) => nodeMap.set(node.id, node));
-    graph.relationships.forEach((relationship) => relationshipMap.set(relationship.id, relationship));
-  });
-  return {
-    center_id: centerId,
-    depth,
-    nodes: Array.from(nodeMap.values()),
-    relationships: Array.from(relationshipMap.values()),
-  };
-}
-
-function useBooleanPreference(key: string, fallback: boolean) {
-  const [value, setValue] = useState(() => readBooleanPreference(key, fallback));
-
-  useEffect(() => {
-    window.localStorage.setItem(key, value ? 'true' : 'false');
-  }, [key, value]);
-
-  return [value, setValue] as const;
-}
-
-function readBooleanPreference(key: string, fallback: boolean) {
-  if (typeof window === 'undefined') return fallback;
-  const stored = window.localStorage.getItem(key);
-  if (stored === 'true') return true;
-  if (stored === 'false') return false;
-  return fallback;
-}
-
-function useLayoutModePreference(key: string, fallback: GraphLayoutMode) {
-  const [value, setValue] = useState(() => readLayoutModePreference(key, fallback));
-
-  useEffect(() => {
-    window.localStorage.setItem(key, value);
-  }, [key, value]);
-
-  return [value, setValue] as const;
-}
-
-function readLayoutModePreference(key: string, fallback: GraphLayoutMode) {
-  if (typeof window === 'undefined') return fallback;
-  const stored = window.localStorage.getItem(key);
-  return graphLayoutModes.includes(stored as GraphLayoutMode) ? (stored as GraphLayoutMode) : fallback;
-}
-
-function useClassicPositionPreference(key: string) {
-  const [value, setValue] = useState<ClassicPositionStore>(() => readClassicPositions(key));
-
-  useEffect(() => {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  }, [key, value]);
-
-  return [value, setValue] as const;
-}
-
-function readClassicPositions(key: string) {
-  if (typeof window === 'undefined') return {};
-  const stored = window.localStorage.getItem(key);
-  if (!stored) return {};
-  try {
-    return sanitizeClassicPositionStore(JSON.parse(stored) as unknown);
-  } catch {
-    return {};
-  }
-}
-
-function isEditableTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  return (
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement ||
-    target.isContentEditable
   );
 }

@@ -79,6 +79,34 @@ def test_graph_traversal_returns_local_neighborhood(db_session: Session):
     assert heap.id not in {node.id for node in graph.nodes}
 
 
+def test_graph_depth_one_includes_edges_between_neighbors(db_session: Session):
+    root = create_concept(db_session, schemas.ConceptCreate(name="Root"))
+    a = create_concept(db_session, schemas.ConceptCreate(name="Neighbor A"))
+    b = create_concept(db_session, schemas.ConceptCreate(name="Neighbor B"))
+    create_relationship(
+        db_session,
+        schemas.RelationshipCreate(source_concept_id=root.id, target_concept_id=a.id, relationship_type="USES"),
+    )
+    create_relationship(
+        db_session,
+        schemas.RelationshipCreate(source_concept_id=root.id, target_concept_id=b.id, relationship_type="USES"),
+    )
+    create_relationship(
+        db_session,
+        schemas.RelationshipCreate(source_concept_id=a.id, target_concept_id=b.id, relationship_type="RELATED_TO"),
+    )
+
+    graph = get_local_graph(db_session, root.id, depth=1)
+
+    assert graph is not None
+    assert len(graph.relationships) == 3
+    assert {(r.source_concept_id, r.target_concept_id) for r in graph.relationships} == {
+        (root.id, a.id),
+        (root.id, b.id),
+        (a.id, b.id),
+    }
+
+
 def test_weak_relationship_detection(db_session: Session):
     dijkstra = create_concept(db_session, schemas.ConceptCreate(name="Dijkstra's Algorithm", concept_type="algorithm"))
     weights = create_concept(db_session, schemas.ConceptCreate(name="Nonnegative Edge Weights", concept_type="property"))

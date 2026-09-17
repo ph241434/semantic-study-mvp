@@ -10,30 +10,41 @@ def seed_database(db: Session) -> None:
         return
 
     now = datetime.now(timezone.utc)
+
+    # Componential/semantic concepts only. Broad organizational categories (Cybersecurity,
+    # Encryption, Cryptography, Authentication, Network Security, ...) live purely in the
+    # KnowledgeEntry filesystem tree below, not as Concept rows -- the filesystem hierarchy and
+    # the semantic graph are deliberately separate data models.
     concept_rows = [
-        ("Graph Theory", "The study of vertices, edges, and relationships between objects.", "concept", 0.62),
-        ("Dijkstra's Algorithm", "A shortest-path algorithm for graphs with nonnegative edge weights.", "algorithm", 0.48),
-        ("Bellman-Ford Algorithm", "A shortest-path algorithm that can handle negative edge weights.", "algorithm", 0.44),
-        ("Priority Queue", "An abstract data type that returns the highest-priority item efficiently.", "definition", 0.54),
-        ("Binary Heap", "A tree-shaped structure commonly used to implement priority queues.", "mechanism", 0.43),
-        ("Weighted Graph", "A graph whose edges carry numeric weights or costs.", "concept", 0.58),
-        ("Edge Weight", "A numeric value attached to an edge, often representing cost or distance.", "property", 0.52),
-        ("Negative Edge Weight", "An edge weight below zero, which breaks assumptions in some algorithms.", "property", 0.32),
-        ("Nonnegative Edge Weights", "Edge weights that are zero or positive.", "property", 0.37),
-        ("Shortest Path", "A path with minimum total cost between vertices.", "concept", 0.5),
-        ("Shortest Path Algorithm", "An algorithm that finds minimum-cost paths in a graph.", "algorithm", 0.46),
-        ("Relaxation", "The operation of improving a tentative shortest-path estimate.", "mechanism", 0.41),
-        ("Big-O Notation", "A notation for describing asymptotic growth and algorithmic cost.", "definition", 0.55),
+        ("Symmetric Encryption", "Encryption that uses the same key for both encrypting and decrypting data.", "concept"),
+        ("Asymmetric Encryption", "Encryption that uses a mathematically linked public and private key pair.", "concept"),
+        ("Hashing", "A one-way transformation that maps data to a fixed-size digest, used to verify integrity.", "concept"),
+        ("Keys", "Secret or paired values that control how encryption and decryption transform data.", "concept"),
+        ("Algorithm", "A precise sequence of steps a cryptographic system follows to transform data.", "definition"),
+        ("Plaintext", "Readable data before it has been encrypted.", "definition"),
+        ("Ciphertext", "Encrypted data produced by applying an encryption algorithm to plaintext.", "definition"),
+        ("Public Key", "The publicly shareable half of an asymmetric key pair, used to encrypt data or verify signatures.", "definition"),
+        ("Private Key", "The secret half of an asymmetric key pair, used to decrypt data or create signatures.", "definition"),
+        ("Key Pair", "A mathematically linked public and private key generated together for asymmetric cryptography.", "definition"),
+        ("Digital Signatures", "A cryptographic proof, created with a private key, that verifies authenticity and integrity.", "mechanism"),
+        ("Certificates", "Digitally signed documents that bind a public key to a verified identity.", "concept"),
+        ("PKI", "Public Key Infrastructure: the roles, policies, and systems that manage certificates and public keys.", "concept"),
+        ("AES", "Advanced Encryption Standard: a widely used symmetric block cipher.", "algorithm"),
+        ("RSA", "A widely used asymmetric algorithm based on the difficulty of factoring large numbers.", "algorithm"),
+        ("Dijkstra's Algorithm", "Finds shortest paths from a source node in a weighted graph with nonnegative edge weights.", "algorithm"),
+        ("Breadth-First Search", "Traverses a graph level by level, visiting all neighbors before moving deeper.", "algorithm"),
+        ("Depth-First Search", "Traverses a graph by exploring as far as possible along each branch before backtracking.", "algorithm"),
+        ("Bellman-Ford", "Finds shortest paths from a source node, tolerating negative edge weights.", "algorithm"),
+        ("Firewalls", "A system that monitors and filters network traffic based on security rules.", "mechanism"),
+        ("Multi-Factor Authentication", "Verifying identity using two or more independent evidence factors.", "mechanism"),
     ]
 
     concepts: dict[str, models.Concept] = {}
-    for name, description, concept_type, mastery in concept_rows:
+    for name, description, concept_type in concept_rows:
         concept = models.Concept(
             name=name,
             description=description,
             concept_type=concept_type,
-            mastery_score=mastery,
-            confidence=0.45,
             next_review_at=now,
         )
         db.add(concept)
@@ -41,117 +52,92 @@ def seed_database(db: Session) -> None:
     db.flush()
 
     relationship_rows = [
-        ("Dijkstra's Algorithm", "IS_A", "Shortest Path Algorithm", "Dijkstra is a specific shortest-path method.", 0.5),
-        ("Dijkstra's Algorithm", "USES", "Priority Queue", "A priority queue selects the next closest frontier vertex.", 0.39),
-        ("Priority Queue", "IMPLEMENTED_BY", "Binary Heap", "A binary heap is a common efficient priority queue implementation.", 0.42),
-        (
-            "Dijkstra's Algorithm",
-            "REQUIRES",
-            "Nonnegative Edge Weights",
-            "The greedy choice is valid only when later edges cannot reduce a settled distance.",
-            0.27,
-        ),
-        (
-            "Dijkstra's Algorithm",
-            "CONTRASTS_WITH",
-            "Bellman-Ford Algorithm",
-            "Bellman-Ford tolerates negative edges but is usually slower.",
-            0.35,
-        ),
-        (
-            "Bellman-Ford Algorithm",
-            "SUPPORTS",
-            "Negative Edge Weight",
-            "Bellman-Ford can relax edges repeatedly to account for negative weights.",
-            0.31,
-        ),
-        ("Dijkstra's Algorithm", "USES", "Relaxation", "Relaxation updates tentative distances.", 0.45),
-        ("Weighted Graph", "PART_OF", "Graph Theory", "Weighted graphs are a major graph model.", 0.57),
-        ("Edge Weight", "PART_OF", "Weighted Graph", "Weights are the values assigned to weighted graph edges.", 0.53),
-        ("Negative Edge Weight", "IS_A", "Edge Weight", "A negative edge weight is a special case of edge weight.", 0.36),
-        ("Nonnegative Edge Weights", "CONTRASTS_WITH", "Negative Edge Weight", "The sign of edge weights changes algorithm choice.", 0.34),
-        ("Shortest Path Algorithm", "SOLVES", "Shortest Path", "These algorithms compute shortest paths.", 0.49),
-        ("Dijkstra's Algorithm", "DEPENDS_ON", "Big-O Notation", "Runtime comparisons are expressed with asymptotic notation.", 0.4),
+        ("Symmetric Encryption", "USES", "Keys", "Symmetric encryption uses one shared key for both directions."),
+        ("AES", "EXAMPLE_OF", "Symmetric Encryption", "AES is a widely deployed symmetric block cipher."),
+        ("Asymmetric Encryption", "USES", "Public Key", "The public key encrypts data or verifies signatures."),
+        ("Asymmetric Encryption", "USES", "Private Key", "The private key decrypts data or creates signatures."),
+        ("Asymmetric Encryption", "PRODUCES", "Ciphertext", "Encrypting plaintext with the algorithm yields ciphertext."),
+        ("Asymmetric Encryption", "REQUIRES", "Key Pair", "Asymmetric encryption depends on a linked public/private key pair."),
+        ("Asymmetric Encryption", "RELATED_TO", "Digital Signatures", "The same key pair mechanics underpin digital signatures."),
+        ("RSA", "EXAMPLE_OF", "Asymmetric Encryption", "RSA is a widely used asymmetric algorithm."),
+        ("Keys", "CONTAINS", "Public Key", "A public key is one type of cryptographic key."),
+        ("Keys", "CONTAINS", "Private Key", "A private key is one type of cryptographic key."),
+        ("Keys", "CONTAINS", "Key Pair", "A key pair bundles a public and private key together."),
+        ("Key Pair", "CONTAINS", "Public Key", "A key pair includes a public key half."),
+        ("Key Pair", "CONTAINS", "Private Key", "A key pair includes a private key half."),
+        ("Certificates", "CONTAINS", "Public Key", "A certificate binds a public key to a verified identity."),
+        ("Public Key", "PART_OF", "PKI", "Public keys are managed within a public key infrastructure."),
+        ("Public Key", "RELATED_TO", "Digital Signatures", "Public keys are used to verify digital signatures."),
+        ("Digital Signatures", "REQUIRES", "Private Key", "Creating a signature requires the signer's private key."),
+        ("Certificates", "USES", "Digital Signatures", "A certificate authority signs certificates with its own key."),
+        ("PKI", "CONTAINS", "Certificates", "PKI issues and manages digital certificates."),
+        ("Public Key", "ENCRYPTS", "Ciphertext", "The public key encrypts plaintext into ciphertext that only the paired private key can decrypt."),
+        ("Private Key", "DECRYPTS", "Ciphertext", "The private key decrypts ciphertext back into the original plaintext."),
     ]
 
-    relationships: dict[tuple[str, str, str], models.Relationship] = {}
-    for source, rel_type, target, description, mastery in relationship_rows:
-        relationship = models.Relationship(
-            source_concept_id=concepts[source].id,
-            target_concept_id=concepts[target].id,
-            relationship_type=rel_type,
-            description=description,
-            mastery_score=mastery,
-            confidence=0.42,
-            next_review_at=now,
-        )
-        db.add(relationship)
-        relationships[(source, rel_type, target)] = relationship
-    db.flush()
-
-    question_rows = [
-        (
-            "What is Dijkstra's algorithm?",
-            "A shortest-path algorithm that repeatedly settles the closest unsettled vertex when edge weights are nonnegative.",
-            "CONCEPT_RECALL",
-            "Dijkstra's Algorithm",
-            None,
-        ),
-        (
-            "Why does Dijkstra require nonnegative edge weights?",
-            "A negative edge could later reduce a path to a vertex already treated as final, breaking the greedy guarantee.",
-            "RELATIONSHIP_RECALL",
-            None,
-            ("Dijkstra's Algorithm", "REQUIRES", "Nonnegative Edge Weights"),
-        ),
-        (
-            "What relationship exists between Dijkstra and priority queues?",
-            "Dijkstra uses a priority queue to choose the vertex with the smallest tentative distance.",
-            "RELATIONSHIP_RECALL",
-            None,
-            ("Dijkstra's Algorithm", "USES", "Priority Queue"),
-        ),
-        (
-            "Compare Dijkstra and Bellman-Ford.",
-            "Dijkstra is faster on nonnegative weights; Bellman-Ford handles negative weights through repeated relaxation.",
-            "COMPARISON",
-            None,
-            ("Dijkstra's Algorithm", "CONTRASTS_WITH", "Bellman-Ford Algorithm"),
-        ),
-        (
-            'Starting from "Dijkstra", reconstruct its important neighboring concepts.',
-            "Key neighbors include shortest path algorithms, priority queues, nonnegative weights, Bellman-Ford, relaxation, and Big-O notation.",
-            "GRAPH_RECONSTRUCTION",
-            "Dijkstra's Algorithm",
-            None,
-        ),
-        (
-            "What does relaxation do in shortest-path algorithms?",
-            "It checks whether a known path can improve a tentative distance estimate and updates that estimate if so.",
-            "EXPLANATION",
-            "Relaxation",
-            None,
-        ),
-        (
-            "How can a priority queue be implemented?",
-            "A binary heap is a common implementation that gives efficient insertions and removals of the minimum or maximum item.",
-            "RELATIONSHIP_RECALL",
-            None,
-            ("Priority Queue", "IMPLEMENTED_BY", "Binary Heap"),
-        ),
-    ]
-
-    for text, answer, q_type, concept_name, relationship_key in question_rows:
+    for source, rel_type, target, description in relationship_rows:
         db.add(
-            models.Question(
-                question_text=text,
-                answer_text=answer,
-                question_type=q_type,
-                difficulty=3 if q_type in {"COMPARISON", "GRAPH_RECONSTRUCTION"} else 2,
-                concept_id=concepts[concept_name].id if concept_name else None,
-                relationship_id=relationships[relationship_key].id if relationship_key else None,
+            models.Relationship(
+                source_concept_id=concepts[source].id,
+                target_concept_id=concepts[target].id,
+                relationship_type=rel_type,
+                description=description,
+                next_review_at=now,
             )
         )
+    db.flush()
+
+    _seed_knowledge_tree(db, concepts)
 
     db.commit()
 
+
+def _seed_knowledge_tree(db: Session, concepts: dict[str, models.Concept]) -> None:
+    def add_folder(parent_id: int | None, name: str, sort_order: int) -> models.KnowledgeEntry:
+        entry = models.KnowledgeEntry(parent_id=parent_id, name=name, entry_type="folder", sort_order=sort_order)
+        db.add(entry)
+        db.flush()
+        return entry
+
+    def add_concept_file(parent_id: int, name: str, concept_name: str, sort_order: int) -> models.KnowledgeEntry:
+        entry = models.KnowledgeEntry(
+            parent_id=parent_id,
+            name=name,
+            entry_type="concept",
+            concept_id=concepts[concept_name].id,
+            sort_order=sort_order,
+        )
+        db.add(entry)
+        db.flush()
+        return entry
+
+    algorithms = add_folder(None, "Algorithms", 0)
+    cybersecurity = add_folder(None, "Cybersecurity", 1)
+    add_folder(None, "Operating Systems", 2)
+    add_folder(None, "Databases", 3)
+
+    add_folder(algorithms.id, "Sorting", 0)
+    add_folder(algorithms.id, "Searching", 1)
+    graph_algorithms = add_folder(algorithms.id, "Graph Algorithms", 2)
+    add_folder(algorithms.id, "Dynamic Programming", 3)
+
+    add_concept_file(graph_algorithms.id, "Dijkstra's Algorithm", "Dijkstra's Algorithm", 0)
+    add_concept_file(graph_algorithms.id, "Breadth-First Search", "Breadth-First Search", 1)
+    add_concept_file(graph_algorithms.id, "Depth-First Search", "Depth-First Search", 2)
+    add_concept_file(graph_algorithms.id, "Bellman-Ford", "Bellman-Ford", 3)
+
+    cryptography = add_folder(cybersecurity.id, "Cryptography", 0)
+    network_security = add_folder(cybersecurity.id, "Network Security", 1)
+    authentication = add_folder(cybersecurity.id, "Authentication", 2)
+
+    add_concept_file(cryptography.id, "Asymmetric Encryption", "Asymmetric Encryption", 0)
+    add_concept_file(cryptography.id, "Symmetric Encryption", "Symmetric Encryption", 1)
+    add_concept_file(cryptography.id, "Hashing", "Hashing", 2)
+    add_concept_file(cryptography.id, "Digital Signatures", "Digital Signatures", 3)
+    add_concept_file(cryptography.id, "Certificates", "Certificates", 4)
+    add_concept_file(cryptography.id, "PKI", "PKI", 5)
+    add_concept_file(cryptography.id, "Public Key", "Public Key", 6)
+    add_concept_file(cryptography.id, "Private Key", "Private Key", 7)
+
+    add_concept_file(network_security.id, "Firewalls", "Firewalls", 0)
+    add_concept_file(authentication.id, "Multi-Factor Authentication", "Multi-Factor Authentication", 0)

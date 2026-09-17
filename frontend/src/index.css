@@ -589,3 +589,405 @@ textarea {
   }
 }
 
+/* Semantic drill-down prototype: dark, minimal, graph-dominant. */
+
+.proto-app {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #090b0f;
+  color: #f8f7f2;
+}
+
+.proto-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-wrap: wrap;
+}
+
+.proto-breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-width: 0;
+}
+
+.proto-breadcrumb-segment {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.proto-breadcrumb-separator {
+  color: rgba(248, 247, 242, 0.32);
+  padding: 0 2px;
+}
+
+.proto-breadcrumb-item {
+  background: none;
+  border: none;
+  color: rgba(248, 247, 242, 0.56);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.proto-breadcrumb-item:hover:not(:disabled) {
+  color: #f8f7f2;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.proto-breadcrumb-item-current,
+.proto-breadcrumb-item:disabled {
+  color: #f8f7f2;
+  cursor: default;
+}
+
+.proto-mode-toggle {
+  display: inline-flex;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 7px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.proto-mode-button {
+  background: transparent;
+  border: none;
+  color: rgba(248, 247, 242, 0.6);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.proto-mode-button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.proto-mode-button-active {
+  background: rgba(56, 216, 204, 0.16);
+  color: #38d8cc;
+}
+
+.proto-main {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.proto-canvas,
+.proto-canvas .react-flow {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.proto-status {
+  position: absolute;
+  top: 40%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: rgba(248, 247, 242, 0.5);
+  font-size: 13px;
+}
+
+.proto-status-error {
+  color: #ff9d85;
+}
+
+.proto-leaf {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 24px;
+  gap: 10px;
+}
+
+.proto-leaf-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.proto-leaf-desc {
+  max-width: 440px;
+  color: rgba(248, 247, 242, 0.62);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.proto-node {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+}
+
+.proto-node-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: rgba(248, 247, 242, 0.9);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.proto-node-root {
+  border-color: #38d8cc;
+  background: rgba(56, 216, 204, 0.1);
+  cursor: default;
+}
+
+.proto-node-hidden {
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.proto-node-hidden .proto-node-label {
+  color: rgba(248, 247, 242, 0.42);
+  letter-spacing: 0.1em;
+}
+
+.proto-node-answer {
+  border-color: #f5c542;
+  background: rgba(245, 197, 66, 0.12);
+}
+
+.proto-node-handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.proto-edge-label {
+  position: absolute;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: rgba(248, 247, 242, 0.55);
+  background: #0d0f13;
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.proto-edge-label-hidden {
+  color: rgba(248, 247, 242, 0.3);
+  border: 1px dashed rgba(255, 255, 255, 0.28);
+}
+
+.proto-edge-label-answer {
+  color: #f5c542;
+}
+
+.proto-study-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(9, 11, 15, 0.9);
+  flex-wrap: wrap;
+}
+
+.proto-study-question {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(248, 247, 242, 0.46);
+}
+
+.proto-study-prompt {
+  margin: 2px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #f8f7f2;
+}
+
+.proto-study-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.proto-btn {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
+  color: #f8f7f2;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.proto-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.proto-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .proto-topbar {
+    padding: 10px 12px;
+  }
+
+  .proto-study-bar {
+    padding: 10px 12px;
+  }
+}
+
+/* Filesystem browsing layer: plain folder/file list, no graph visuals. */
+
+.proto-fs-list {
+  display: flex;
+  flex-direction: column;
+  max-width: 520px;
+  margin: 24px auto;
+  padding: 0 20px;
+  gap: 2px;
+}
+
+.proto-fs-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: #f8f7f2;
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: 6px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.proto-fs-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.proto-fs-row-icon {
+  flex-shrink: 0;
+  color: rgba(248, 247, 242, 0.4);
+}
+
+.proto-fs-row-folder .proto-fs-row-icon {
+  color: #38d8cc;
+}
+
+.proto-fs-row-concept {
+  font-weight: 500;
+  color: rgba(248, 247, 242, 0.82);
+}
+
+.proto-fs-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proto-fs-empty {
+  margin: 48px auto;
+  text-align: center;
+  color: rgba(248, 247, 242, 0.4);
+  font-size: 13px;
+}
+
+/* Linked vs. description graph nodes. */
+
+.proto-node-linked {
+  border-color: rgba(56, 216, 204, 0.5);
+}
+
+.proto-node-description {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.proto-node-description .proto-node-label {
+  color: rgba(248, 247, 242, 0.72);
+}
+
+/* Small dismissible description popover for non-linked graph nodes. */
+
+.proto-description-panel {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  max-width: 300px;
+  background: rgba(13, 15, 19, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 12px 14px;
+  box-shadow: 0 18px 44px rgba(4, 6, 8, 0.5);
+}
+
+.proto-description-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.proto-description-panel-header h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.proto-description-panel-close {
+  background: none;
+  border: none;
+  color: rgba(248, 247, 242, 0.5);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.proto-description-panel-close:hover {
+  color: #f8f7f2;
+}
+
+.proto-description-panel p {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: rgba(248, 247, 242, 0.7);
+}
+

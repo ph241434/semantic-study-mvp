@@ -79,6 +79,22 @@ class Relationship(Base):
     review_attempts = orm_relationship("ReviewAttempt", back_populates="relationship")
 
 
+class KnowledgeEntry(Base):
+    __tablename__ = "knowledge_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    parent_id = Column(Integer, ForeignKey("knowledge_entries.id"), nullable=True, index=True)
+    name = Column(String(140), nullable=False)
+    entry_type = Column(String(20), nullable=False)
+    concept_id = Column(Integer, ForeignKey("concepts.id"), nullable=True, index=True)
+    sort_order = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    parent = orm_relationship("KnowledgeEntry", remote_side=[id], back_populates="children")
+    children = orm_relationship("KnowledgeEntry", back_populates="parent")
+    concept = orm_relationship("Concept")
+
+
 class Question(Base):
     __tablename__ = "questions"
 

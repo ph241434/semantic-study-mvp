@@ -114,3 +114,18 @@ export type ReconstructionResponse = {
   graph: GraphResponse;
 };
 
+export type KnowledgeEntryType = 'folder' | 'concept';
+
+export type KnowledgeEntry = {
+  id: number;
+  parent_id: number | null;
+  name: string;
+  entry_type: KnowledgeEntryType;
+  concept_id: number | null;
+  sort_order: number;
+};
+
+export type TrailEntry = { id: number; name: string };
+
+export type FilesystemBreadcrumbSegment = { id: number | null; name: string };
+

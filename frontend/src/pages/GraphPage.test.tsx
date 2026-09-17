@@ -1,96 +1,57 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { useState } from 'react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ClassicPositionStore, GraphLayoutMode, GraphLayoutResult, Point } from '../graph/layout';
-import type { Concept, GraphResponse, Question, Relationship } from '../types';
+import type { FilesystemBreadcrumbSegment, GraphResponse, Relationship, TrailEntry } from '../types';
 
 vi.mock('../components/GraphCanvas', () => ({
   GraphCanvas: ({
     graph,
-    layout,
+    rootId,
+    hidden,
     onSelectConcept,
-    onSelectRelationship,
-    onNodePositionChange,
-    onPaneClick,
-    variant,
-    showGrid,
-    layoutMode,
-    viewportRevision,
   }: {
-    graph: GraphResponse | null;
-    layout: GraphLayoutResult | null;
-    classicPositions: ClassicPositionStore;
+    graph: GraphResponse;
+    rootId: number;
+    hidden: { edgeId: number; hiddenConceptId: number | null; revealed: boolean } | null;
     onSelectConcept: (conceptId: number) => void;
-    onSelectRelationship: (relationshipId: number) => void;
-    onNodePositionChange?: (conceptId: number, position: Point) => void;
-    onPaneClick: () => void;
-    variant: string;
-    showGrid: boolean;
-    layoutMode: GraphLayoutMode;
-    viewportRevision: number;
-  }) => {
-    const nodeTwo = layout?.nodes.find((node) => node.conceptId === 2);
-
-    return (
-      <div
-        data-testid="mock-graph-canvas"
-        data-variant={variant}
-        data-grid={String(showGrid)}
-        data-layout={layoutMode}
-        data-viewport-revision={viewportRevision}
-        data-node-count={graph?.nodes.length ?? 0}
-        data-node-two-x={nodeTwo?.position.x ?? ''}
-        data-node-two-y={nodeTwo?.position.y ?? ''}
-      >
-        <button type="button" onClick={() => onSelectConcept(2)}>
-          Select mock node
+  }) => (
+    <div
+      data-testid="mock-graph-canvas"
+      data-root-id={rootId}
+      data-node-count={graph.nodes.length}
+      data-hidden-concept={hidden?.hiddenConceptId ?? ''}
+      data-hidden-edge={hidden?.edgeId ?? ''}
+      data-revealed={String(Boolean(hidden?.revealed))}
+    >
+      {graph.nodes.map((node) => (
+        <button key={node.id} type="button" onClick={() => onSelectConcept(node.id)}>
+          {`Select node ${node.id}`}
         </button>
-        <button type="button" onClick={() => onSelectRelationship(10)}>
-          Select mock edge
-        </button>
-        <button type="button" onClick={() => onNodePositionChange?.(2, { x: 120, y: 144 })}>
-          Drag mock node
-        </button>
-        <button type="button" onClick={onPaneClick}>
-          Click empty canvas
-        </button>
-      </div>
-    );
-  },
+      ))}
+    </div>
+  ),
 }));
 
 vi.mock('../api/client', () => ({
   api: {
     graph: vi.fn(),
-    search: vi.fn().mockResolvedValue([]),
-    updateConcept: vi.fn(),
-    updateRelationship: vi.fn(),
-    deleteRelationship: vi.fn(),
-    createConcept: vi.fn(),
-    createRelationship: vi.fn(),
   },
 }));
 
 import { api } from '../api/client';
-import { CLASSIC_LAYOUT_STORAGE_KEY, clearGraphLayoutCaches, getGraphLayoutCacheStats } from '../graph/layout';
 import { GraphPage } from './GraphPage';
 
-const concepts = [concept(1, "Dijkstra's Algorithm", 'algorithm'), concept(2, 'Priority Queue', 'definition')];
-const relationships = [relationship(10, 1, 2, 'USES')];
-const questions = [question(100, 1, null), question(101, null, 10)];
-
-function concept(id: number, name: string, conceptType: Concept['concept_type']): Concept {
+function concept(id: number, name: string, description = `${name} description`) {
   return {
     id,
     name,
-    description: `${name} description`,
-    concept_type: conceptType,
-    mastery_score: 0.5,
-    confidence: 0.4,
-    created_at: '2026-09-09T00:00:00Z',
-    updated_at: '2026-09-09T00:00:00Z',
+    description,
+    concept_type: 'concept' as const,
+    mastery_score: 0,
+    confidence: 0.3,
+    created_at: '2026-09-17T00:00:00Z',
+    updated_at: '2026-09-17T00:00:00Z',
     last_reviewed_at: null,
     next_review_at: null,
     review_interval_days: 1,
@@ -103,215 +64,185 @@ function relationship(id: number, sourceId: number, targetId: number, relationsh
     source_concept_id: sourceId,
     target_concept_id: targetId,
     relationship_type: relationshipType,
-    description: `${relationshipType} description`,
-    mastery_score: 0.6,
-    confidence: 0.5,
-    created_at: '2026-09-09T00:00:00Z',
-    updated_at: '2026-09-09T00:00:00Z',
+    description: '',
+    mastery_score: 0,
+    confidence: 0.3,
+    created_at: '2026-09-17T00:00:00Z',
+    updated_at: '2026-09-17T00:00:00Z',
     last_reviewed_at: null,
     next_review_at: null,
     review_interval_days: 1,
-    source_name: "Dijkstra's Algorithm",
-    target_name: 'Priority Queue',
+    source_name: null,
+    target_name: null,
   };
 }
 
-function question(id: number, conceptId: number | null, relationshipId: number | null): Question {
-  return {
-    id,
-    question_text: `Question ${id}`,
-    answer_text: 'Answer',
-    question_type: 'CONCEPT_RECALL',
-    difficulty: 2,
-    concept_id: conceptId,
-    relationship_id: relationshipId,
-    created_at: '2026-09-09T00:00:00Z',
-  };
-}
+const asymmetricEncryption = concept(1, 'Asymmetric Encryption');
+const publicKey = concept(2, 'Public Key');
+const ciphertext = concept(3, 'Ciphertext', 'Encrypted output produced from plaintext.');
+const certificates = concept(4, 'Certificates');
+const firewalls = concept(5, 'Firewalls');
 
-function Harness({ onChangeView = vi.fn() }: { onChangeView?: (view: 'dashboard' | 'graph' | 'study' | 'reconstruction') => void }) {
-  const [selectedConceptId, setSelectedConceptId] = useState<number | null>(1);
-  const [selectedRelationshipId, setSelectedRelationshipId] = useState<number | null>(null);
+const graphs: Record<number, GraphResponse> = {
+  1: {
+    center_id: 1,
+    depth: 1,
+    nodes: [asymmetricEncryption, publicKey, ciphertext],
+    relationships: [relationship(10, 1, 2, 'USES'), relationship(11, 1, 3, 'PRODUCES')],
+  },
+  2: {
+    center_id: 2,
+    depth: 1,
+    nodes: [publicKey, certificates],
+    relationships: [relationship(20, 4, 2, 'CONTAINS')],
+  },
+  5: {
+    center_id: 5,
+    depth: 1,
+    nodes: [firewalls],
+    relationships: [],
+  },
+};
 
-  return (
+const linkedConceptIds = new Set([1, 2, 5]);
+
+const filesystemBreadcrumb: FilesystemBreadcrumbSegment[] = [
+  { id: null, name: 'Knowledge' },
+  { id: 10, name: 'Cybersecurity' },
+  { id: 11, name: 'Cryptography' },
+];
+
+function renderGraphPage(trail: TrailEntry[], overrides: Partial<Parameters<typeof GraphPage>[0]> = {}) {
+  const onTrailChange = vi.fn();
+  const onExitToFilesystem = vi.fn();
+  const utils = render(
     <GraphPage
-      concepts={concepts}
-      relationships={relationships}
-      questions={questions}
-      selectedConceptId={selectedConceptId}
-      selectedRelationshipId={selectedRelationshipId}
-      currentView="graph"
-      onChangeView={onChangeView}
-      onSelectConcept={setSelectedConceptId}
-      onSelectRelationship={setSelectedRelationshipId}
-      onCatalogChanged={async () => undefined}
-      onStudyQuestion={vi.fn()}
-    />
+      trail={trail}
+      filesystemBreadcrumb={filesystemBreadcrumb}
+      linkedConceptIds={linkedConceptIds}
+      onTrailChange={onTrailChange}
+      onExitToFilesystem={onExitToFilesystem}
+      {...overrides}
+    />,
   );
+  return { ...utils, onTrailChange, onExitToFilesystem };
 }
 
-describe('GraphPage classic graph workspace', () => {
+describe('GraphPage single-depth semantic graph', () => {
   beforeEach(() => {
-    window.localStorage.clear();
-    clearGraphLayoutCaches();
     vi.clearAllMocks();
-    vi.mocked(api.graph).mockImplementation(async (conceptId: number, depth: number) => ({
-      center_id: conceptId,
-      depth,
-      nodes: concepts,
-      relationships,
-    }));
+    vi.mocked(api.graph).mockImplementation(async (conceptId: number) => graphs[conceptId]);
   });
 
   afterEach(() => {
     cleanup();
   });
 
-  it('renders the graph as the full workspace surface with an overlaid sidebar', async () => {
-    render(<Harness />);
+  it('shows only the root concept and its immediate neighborhood, with the combined breadcrumb', async () => {
+    renderGraphPage([{ id: 1, name: 'Asymmetric Encryption' }]);
 
-    expect(screen.getByTestId('graph-workspace')).toHaveClass('graph-workspace');
     const canvas = await screen.findByTestId('mock-graph-canvas');
-    expect(canvas).toHaveAttribute('data-variant', 'workspace');
-    expect(canvas).toHaveAttribute('data-layout', 'classic');
-    expect(screen.getByTestId('graph-tool-rail')).toHaveAttribute('data-collapsed', 'false');
-    expect(screen.getByRole('button', { name: 'Add Concept' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add Relationship' })).toBeInTheDocument();
+    expect(canvas).toHaveAttribute('data-root-id', '1');
+    expect(canvas).toHaveAttribute('data-node-count', '3');
+
+    const breadcrumb = screen.getByTestId('graph-breadcrumb');
+    expect(breadcrumb).toHaveTextContent('Knowledge');
+    expect(breadcrumb).toHaveTextContent('Cryptography');
+    expect(breadcrumb).toHaveTextContent('Asymmetric Encryption');
+    expect(api.graph).toHaveBeenCalledWith(1, 1);
   });
 
-  it('collapses and expands the sidebar without remounting the graph content', async () => {
-    render(<Harness />);
-    await waitFor(() => expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-node-count', '2'));
-    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-viewport-revision', '0');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse Sidebar' }));
-
-    const collapsedRail = screen.getByTestId('graph-tool-rail');
-    expect(collapsedRail).toHaveAttribute('data-collapsed', 'true');
-    expect(within(collapsedRail).getByRole('button', { name: 'Add Concept' })).toBeInTheDocument();
-    expect(within(collapsedRail).getByRole('button', { name: 'Add Relationship' })).toBeInTheDocument();
-    expect(within(collapsedRail).getByRole('button', { name: 'Search' })).toBeInTheDocument();
-    expect(within(collapsedRail).getByRole('button', { name: 'Open Sidebar' })).toBeInTheDocument();
-    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-viewport-revision', '1');
-
-    fireEvent.click(within(collapsedRail).getByRole('button', { name: 'Open Sidebar' }));
-    expect(screen.getByTestId('graph-tool-rail')).toHaveAttribute('data-collapsed', 'false');
-  });
-
-  it('keeps quick add concept and relationship forms in compact floating dialogs', async () => {
-    render(<Harness />);
+  it('navigates into a linked concept by calling onTrailChange, not by self-managing state', async () => {
+    const { onTrailChange } = renderGraphPage([{ id: 1, name: 'Asymmetric Encryption' }]);
     await screen.findByTestId('mock-graph-canvas');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add Concept' }));
-    expect(screen.getByRole('dialog', { name: 'Add Concept' })).toBeInTheDocument();
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Add Concept' })).getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select node 2' }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add Relationship' }));
-    expect(screen.getByRole('dialog', { name: 'Add Relationship' })).toBeInTheDocument();
+    expect(onTrailChange).toHaveBeenCalledWith([
+      { id: 1, name: 'Asymmetric Encryption' },
+      { id: 2, name: 'Public Key' },
+    ]);
   });
 
-  it('keeps Classic controls available from the sidebar', async () => {
-    render(<Harness />);
+  it('shows a description popover for a non-linked node instead of navigating', async () => {
+    const { onTrailChange } = renderGraphPage([{ id: 1, name: 'Asymmetric Encryption' }]);
     await screen.findByTestId('mock-graph-canvas');
 
-    expect(screen.getByPlaceholderText('Search concepts')).toBeInTheDocument();
-    expect(screen.getByLabelText('Graph layout')).toHaveValue('classic');
-    expect(screen.getByRole('button', { name: 'Reorganize' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Fit Graph' }));
-    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-viewport-revision', '1');
+    fireEvent.click(screen.getByRole('button', { name: 'Select node 3' }));
+
+    expect(onTrailChange).not.toHaveBeenCalled();
+    const panel = await screen.findByTestId('graph-description-panel');
+    expect(panel).toHaveTextContent('Ciphertext');
+    expect(panel).toHaveTextContent('Encrypted output produced from plaintext.');
   });
 
-  it('falls back to Classic when an obsolete layout preference is stored', async () => {
-    window.localStorage.setItem('semantic-study.graphLayoutMode', 'clustered');
+  it('truncates the trail when an earlier trail breadcrumb segment is clicked', async () => {
+    const { onTrailChange } = renderGraphPage([
+      { id: 1, name: 'Asymmetric Encryption' },
+      { id: 2, name: 'Public Key' },
+    ]);
+    await waitFor(() => expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-root-id', '2'));
 
-    render(<Harness />);
-    const canvas = await screen.findByTestId('mock-graph-canvas');
+    fireEvent.click(screen.getByRole('button', { name: 'Asymmetric Encryption' }));
 
-    expect(screen.getByLabelText('Graph layout')).toHaveValue('classic');
-    expect(canvas).toHaveAttribute('data-layout', 'classic');
-    await waitFor(() => expect(window.localStorage.getItem('semantic-study.graphLayoutMode')).toBe('classic'));
+    expect(onTrailChange).toHaveBeenCalledWith([{ id: 1, name: 'Asymmetric Encryption' }]);
   });
 
-  it('persists manual Classic node positions from drag callbacks', async () => {
-    render(<Harness />);
+  it('exits to the filesystem when a filesystem breadcrumb segment is clicked', async () => {
+    const { onExitToFilesystem } = renderGraphPage([{ id: 1, name: 'Asymmetric Encryption' }]);
     await screen.findByTestId('mock-graph-canvas');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Drag mock node' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cryptography' }));
 
-    await waitFor(() => {
-      const stored = readStoredClassicPositions();
-      expect(stored['2']).toEqual({ x: 120, y: 144 });
-    });
+    expect(onExitToFilesystem).toHaveBeenCalledWith(11);
   });
 
-  it('does not recompute layout when grid or sidebar-only state changes', async () => {
-    render(<Harness />);
-    await waitFor(() => expect(readStoredClassicPositions()['1']).toBeDefined());
-    const before = getGraphLayoutCacheStats();
+  it('shows a full description panel instead of a graph for a leaf concept', async () => {
+    renderGraphPage([{ id: 5, name: 'Firewalls' }]);
 
-    fireEvent.click(screen.getByLabelText('Grid'));
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse Sidebar' }));
-
-    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-grid', 'false');
-    expect(getGraphLayoutCacheStats().layoutComputations).toBe(before.layoutComputations);
+    const leaf = await screen.findByTestId('graph-leaf');
+    expect(leaf).toHaveTextContent('Firewalls');
+    expect(screen.queryByTestId('mock-graph-canvas')).not.toBeInTheDocument();
   });
 
-  it('reorganizes Classic positions only when explicitly requested', async () => {
-    render(<Harness />);
+  it('disables Study mode for a leaf concept and enables it for a hub', async () => {
+    renderGraphPage([{ id: 1, name: 'Asymmetric Encryption' }]);
     await screen.findByTestId('mock-graph-canvas');
-    fireEvent.click(screen.getByRole('button', { name: 'Drag mock node' }));
-    await waitFor(() => expect(readStoredClassicPositions()['2']).toEqual({ x: 120, y: 144 }));
+    expect(screen.getByRole('button', { name: 'Study' })).toBeEnabled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reorganize' }));
-
-    await waitFor(() => {
-      const stored = readStoredClassicPositions();
-      expect(stored['2']).not.toEqual({ x: 120, y: 144 });
-    });
-    expect(getGraphLayoutCacheStats().reorganizeComputations).toBe(1);
-    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-viewport-revision', '1');
+    cleanup();
+    renderGraphPage([{ id: 5, name: 'Firewalls' }]);
+    await screen.findByTestId('graph-leaf');
+    expect(screen.getByRole('button', { name: 'Study' })).toBeDisabled();
   });
 
-  it('opens the inspector from node selection and closes it from the canvas', async () => {
-    render(<Harness />);
+  it('hides a node in Study mode, reveals it on demand, and advances with Next', async () => {
+    renderGraphPage([{ id: 1, name: 'Asymmetric Encryption' }]);
     await screen.findByTestId('mock-graph-canvas');
-    fireEvent.click(screen.getByRole('button', { name: 'Close Inspector' }));
 
-    expect(screen.queryByTestId('graph-inspector')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Select mock node' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Study' }));
 
-    expect(screen.getByTestId('graph-inspector')).toHaveTextContent('Priority Queue');
-    fireEvent.click(screen.getByRole('button', { name: 'Click empty canvas' }));
-    expect(screen.queryByTestId('graph-inspector')).not.toBeInTheDocument();
+    const bar = await screen.findByTestId('graph-study-bar');
+    expect(bar).toBeInTheDocument();
+    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-hidden-concept', '2');
+
+    fireEvent.click(screen.getByTestId('graph-reveal'));
+    expect(screen.getByTestId('graph-study-prompt')).toHaveTextContent('Public Key');
+
+    fireEvent.click(screen.getByTestId('graph-next'));
+    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-revealed', 'false');
+    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-hidden-edge', '11');
   });
 
-  it('opens a relationship inspector with edit and delete controls', async () => {
-    render(<Harness />);
+  it('reveals the hidden node instead of navigating when it is clicked directly', async () => {
+    renderGraphPage([{ id: 1, name: 'Asymmetric Encryption' }]);
     await screen.findByTestId('mock-graph-canvas');
-    fireEvent.click(screen.getByRole('button', { name: 'Select mock edge' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Study' }));
+    await screen.findByTestId('graph-study-bar');
 
-    const inspector = screen.getByTestId('graph-inspector');
-    expect(inspector).toHaveTextContent("Dijkstra's Algorithm");
-    expect(inspector).toHaveTextContent('Priority Queue');
-    expect(within(inspector).getByRole('button', { name: 'Edit' })).toBeInTheDocument();
-    expect(within(inspector).getByRole('button', { name: 'Delete' })).toBeInTheDocument();
-  });
+    fireEvent.click(screen.getByRole('button', { name: 'Select node 2' }));
 
-  it('persists the sidebar and grid preferences locally', async () => {
-    const first = render(<Harness />);
-    await screen.findByTestId('mock-graph-canvas');
-    fireEvent.click(screen.getByLabelText('Grid'));
-    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-grid', 'false');
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse Sidebar' }));
-
-    first.unmount();
-    render(<Harness />);
-
-    expect(screen.getByTestId('graph-tool-rail')).toHaveAttribute('data-collapsed', 'true');
-    await waitFor(() => expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-grid', 'false'));
+    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-root-id', '1');
+    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-revealed', 'true');
   });
 });
-
-function readStoredClassicPositions(): ClassicPositionStore {
-  return JSON.parse(window.localStorage.getItem(CLASSIC_LAYOUT_STORAGE_KEY) ?? '{}') as ClassicPositionStore;
-}

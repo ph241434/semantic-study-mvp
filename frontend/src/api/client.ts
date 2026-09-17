@@ -3,6 +3,7 @@ import type {
   ConceptType,
   Dashboard,
   GraphResponse,
+  KnowledgeEntry,
   Question,
   Rating,
   ReconstructionResponse,
@@ -74,5 +75,6 @@ export const api = {
     request<ReconstructionResponse>(`/study/reconstruction/${conceptId}?depth=${depth}`),
   dashboard: () => request<Dashboard>('/dashboard'),
   search: (q: string) => request<Concept[]>(`/search?q=${encodeURIComponent(q)}`),
+  knowledge: () => request<KnowledgeEntry[]>('/knowledge'),
 };
 

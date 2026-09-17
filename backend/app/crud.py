@@ -110,6 +110,14 @@ def delete_relationship(db: Session, relationship: models.Relationship) -> None:
     db.commit()
 
 
+def list_knowledge_entries(db: Session) -> list[models.KnowledgeEntry]:
+    return (
+        db.query(models.KnowledgeEntry)
+        .order_by(models.KnowledgeEntry.sort_order.asc(), models.KnowledgeEntry.id.asc())
+        .all()
+    )
+
+
 def list_questions(db: Session) -> list[models.Question]:
     return db.query(models.Question).order_by(models.Question.created_at.desc()).all()
 

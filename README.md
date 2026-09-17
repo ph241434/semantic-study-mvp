@@ -1,50 +1,249 @@
 # Semantic Study
 
-Semantic Study is a local-first study application for building a semantic knowledge graph, generating active-recall practice, and tracking mastery separately for both concepts and relationships.
+Semantic Study is a local-first learning application for organizing knowledge into a simple filesystem and opening individual concepts as semantic graphs.
 
-The MVP combines:
+The current prototype separates **organization** from **meaning**:
 
-- Concept and relationship CRUD
-- SQLite persistence
-- Local graph traversal by depth
-- Relationship-labeled graph visualization with React Flow
-- Active recall review with Again / Hard / Good / Easy ratings
-- Transparent mastery updates and spaced scheduling
-- Weakest concept and weakest relationship dashboard sections
-- Basic graph reconstruction review
-- Seed data for a small Computer Science graph
+- the filesystem organizes broad subjects into folders and concept files;
+- the semantic graph shows how concepts relate to one another;
+- Study mode turns graph structure into lightweight retrieval practice.
+
+The goal is to keep large knowledge domains easy to browse while using graphs only where relationships between concepts are useful for learning.
+
+## Current Scope
+
+The current frontend is centered on two views.
+
+### 1. Knowledge filesystem
+
+Knowledge is organized with folders and concept files.
+
+```text
+Knowledge
+├── Algorithms/
+├── Cybersecurity/
+├── Operating Systems/
+└── Databases/
+```
+
+Folders are organizational only. A concept file points to an existing semantic `Concept` record rather than duplicating it.
+
+For example:
+
+```text
+Cybersecurity/
+└── Cryptography/
+    ├── Asymmetric Encryption
+    ├── Symmetric Encryption
+    ├── Hashing
+    ├── Digital Signatures
+    ├── Certificates
+    └── PKI
+```
+
+Opening a concept file transitions into its semantic graph.
+
+### 2. Semantic concept graph
+
+A concept graph shows the selected concept and its directly relevant semantic neighborhood.
+
+Example:
+
+```text
+          Asymmetric Encryption
+             USES       USES
+              /           \
+       Public Key      Private Key
+              \           /
+            ENCRYPTS   DECRYPTS
+                  \     /
+                 Ciphertext
+```
+
+The graph is intentionally focused rather than recursively expanding the entire knowledge base.
+
+Graph nodes can behave in three ways:
+
+- **Linked concept** — opens another concept graph.
+- **Description node** — opens a short explanation without navigating away.
+- **Leaf concept** — displays the concept description when there are no relationships to visualize.
+
+Breadcrumbs preserve the navigation path between the filesystem and concept graphs.
+
+## Study Mode
+
+Concept graphs support two modes:
+
+- **Explore** — displays the graph normally.
+- **Study** — hides information and asks the learner to retrieve it.
+
+Study prompts currently cover:
+
+- **Node retrieval** — identify the missing concept.
+- **Relationship retrieval** — identify the relationship between two concepts.
+- **Structural retrieval** — recall another concept involved in the graph.
+
+The interface provides reveal and next-step controls for moving through retrieval prompts.
+
+## Graph Layout
+
+Semantic graphs use a **Fruchterman–Reingold-style force-directed layout implemented with `d3-force`**.
+
+The layout combines:
+
+- repulsion between nodes;
+- attraction between connected nodes;
+- collision handling to reduce overlap;
+- centering forces;
+- stronger anchoring for the root concept.
+
+Initial node positions are seeded deterministically from concept IDs, and the simulation runs for a bounded number of ticks. This keeps graph layouts stable across repeated visits while still allowing the force system to organize the graph.
+
+React Flow is used to render the graph UI.
+
+## Data Model
+
+The application keeps filesystem organization separate from semantic graph data.
+
+### `KnowledgeEntry`
+
+Represents an item in the filesystem.
+
+```text
+KnowledgeEntry
+├── id
+├── parent_id
+├── name
+├── entry_type     # folder | concept
+├── concept_id     # null for folders
+└── sort_order
+```
+
+A concept entry references an existing `Concept` through `concept_id`.
+
+### `Concept`
+
+Represents one semantic concept.
+
+Examples:
+
+```text
+Asymmetric Encryption
+Public Key
+Private Key
+Ciphertext
+Digital Signature
+Certificate
+```
+
+### `Relationship`
+
+Connects two concepts with a labeled semantic relationship.
+
+Examples:
+
+```text
+Asymmetric Encryption --USES--> Public Key
+Public Key --ENCRYPTS--> Ciphertext
+Private Key --DECRYPTS--> Ciphertext
+```
+
+Because organization and semantics are separate, the same concept can participate in many semantic contexts without being duplicated.
 
 ## Architecture
 
 ```text
-semantic-study/
+Browser
+  |
+  v
+React frontend
+  |
+  +-- KnowledgePage.tsx
+  |     filesystem browsing
+  |
+  +-- GraphPage.tsx
+  |     concept navigation
+  |     Explore / Study modes
+  |
+  +-- GraphCanvas.tsx
+  |     graph rendering
+  |
+  +-- graph/layout.ts
+        d3-force layout
+          |
+          v
+      API client
+          |
+          v
+FastAPI backend
+  |
+  +-- /knowledge
+  +-- /graph/{concept_id}
+  +-- concept / relationship APIs
+          |
+          v
+      SQLAlchemy
+          |
+          v
+        SQLite
+```
+
+## Project Structure
+
+```text
+semantic-study-mvp/
 ├── backend/
 │   ├── app/
+│   │   ├── routers/
+│   │   │   ├── knowledge.py
+│   │   │   ├── graph.py
+│   │   │   ├── concepts.py
+│   │   │   └── relationships.py
 │   │   ├── crud.py
-│   │   ├── dashboard_service.py
 │   │   ├── database.py
 │   │   ├── graph_service.py
 │   │   ├── main.py
-│   │   ├── mastery.py
 │   │   ├── models.py
-│   │   ├── scheduler.py
 │   │   ├── schemas.py
-│   │   ├── seed.py
-│   │   └── routers/
+│   │   └── seed.py
 │   ├── tests/
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
 │   │   ├── api/
+│   │   │   └── client.ts
 │   │   ├── components/
+│   │   │   └── GraphCanvas.tsx
+│   │   ├── graph/
+│   │   │   └── layout.ts
 │   │   ├── pages/
-│   │   ├── styles/
+│   │   │   ├── KnowledgePage.tsx
+│   │   │   └── GraphPage.tsx
+│   │   ├── App.tsx
 │   │   └── types/
 │   └── package.json
 └── README.md
 ```
 
-Backend responsibilities are separated into storage, graph traversal, mastery calculation, scheduling, dashboard composition, and API routers. Frontend components call the REST API and keep graph styling centralized in `src/styles/mastery.ts`.
+## Tech Stack
+
+### Frontend
+
+- React
+- TypeScript
+- Vite
+- React Flow (`@xyflow/react`)
+- `d3-force`
+- Vitest
+- Testing Library
+
+### Backend
+
+- Python
+- FastAPI
+- SQLAlchemy
+- SQLite
+- pytest
 
 ## Requirements
 
@@ -52,11 +251,11 @@ Backend responsibilities are separated into storage, graph traversal, mastery ca
 - Node.js 20+
 - pnpm 9+
 
-The app does not require Docker, authentication, cloud services, or an external database.
+The application runs locally and does not require Docker, authentication, cloud services, or an external database.
 
 ## Backend Setup
 
-From PowerShell:
+From the project root:
 
 ```powershell
 cd .\backend
@@ -70,11 +269,11 @@ Start the API:
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-The backend creates `backend\semantic_study.db` automatically on startup and loads seed data if the database is empty.
+The backend creates the SQLite database automatically and loads seed data when the database is empty.
 
 ## Frontend Setup
 
-From a second PowerShell window:
+Open a second terminal:
 
 ```powershell
 cd .\frontend
@@ -82,33 +281,45 @@ pnpm install
 pnpm dev
 ```
 
-Open the local URL printed by Vite, usually:
+Then open:
 
 ```text
 http://127.0.0.1:5173
 ```
 
-If your pnpm security policy blocks `esbuild`, approve it for this project:
+The frontend connects to:
 
-```powershell
-pnpm approve-builds esbuild
+```text
+http://localhost:8000
 ```
 
-## Seed Data
+by default.
 
-Seed data is loaded automatically when the backend starts with an empty database. It includes concepts such as Graph Theory, Dijkstra's Algorithm, Bellman-Ford Algorithm, Priority Queue, Binary Heap, Weighted Graph, Edge Weight, Negative Edge Weight, Nonnegative Edge Weights, Shortest Path, Relaxation, and Big-O Notation.
+A different backend URL can be supplied with:
 
-To reset the local data:
-
-```powershell
-cd .\backend
-Remove-Item .\semantic_study.db
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```text
+VITE_API_BASE_URL
 ```
 
-## API
+## Main API Endpoints
 
-Core endpoints:
+### Knowledge navigation
+
+```text
+GET /knowledge
+```
+
+Returns the filesystem entries used by the knowledge browser.
+
+### Semantic graph
+
+```text
+GET /graph/{concept_id}?depth=1
+```
+
+Returns the selected concept, visible neighboring concepts, and relationships among the visible nodes.
+
+### Concepts
 
 ```text
 GET    /concepts
@@ -116,26 +327,49 @@ POST   /concepts
 GET    /concepts/{id}
 PATCH  /concepts/{id}
 DELETE /concepts/{id}
+```
 
+### Relationships
+
+```text
 GET    /relationships
 POST   /relationships
 PATCH  /relationships/{id}
 DELETE /relationships/{id}
-
-GET    /graph/{concept_id}?depth=1
-
-GET    /questions
-POST   /questions
-
-GET    /study/due
-POST   /study/review
-GET    /study/reconstruction/{concept_id}?depth=1
-
-GET    /dashboard
-GET    /search?q=hash
 ```
 
-## Tests
+The backend also contains earlier study, question, dashboard, and search APIs. The current frontend prototype is primarily focused on the filesystem, semantic graph, and graph-based retrieval workflow.
+
+## Seed Data
+
+The current seed data is designed to demonstrate the filesystem/semantic-graph split.
+
+It includes broad organizational areas such as:
+
+- Algorithms
+- Cybersecurity
+- Operating Systems
+- Databases
+
+The cybersecurity content includes graph-ready concepts such as asymmetric encryption, public/private keys, ciphertext, digital signatures, certificates, and PKI.
+
+The seed also includes relationships between visible concepts so process-oriented graphs can express connections such as:
+
+```text
+Public Key --ENCRYPTS--> Ciphertext
+Private Key --DECRYPTS--> Ciphertext
+```
+
+To rebuild the local seed database, stop the backend, delete the SQLite database, and restart the API.
+
+From `backend`:
+
+```powershell
+Remove-Item .\semantic_study.db
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+## Testing
 
 Backend:
 
@@ -151,14 +385,23 @@ cd .\frontend
 pnpm test
 ```
 
-Build frontend:
+Production frontend build:
 
 ```powershell
 cd .\frontend
 pnpm build
 ```
 
-## Notes
+## Current Design Direction
 
-The mastery model is intentionally simple and transparent. Ratings update mastery by fixed deltas after applying light time decay, and scheduling uses a small rating-based interval multiplier. Both are isolated in `mastery.py` and `scheduler.py` so FSRS or another model can replace them later.
+The project is currently a learning and visualization prototype.
 
+The central design principle is:
+
+```text
+filesystem = where knowledge is organized
+semantic graph = how knowledge is related
+study mode = how relationships are retrieved from memory
+```
+
+The force-directed layout is intentionally experimental and may be replaced or refined as the graph interaction model develops.

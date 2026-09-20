@@ -8,6 +8,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship as orm_relationship
 
@@ -126,3 +127,79 @@ class ReviewAttempt(Base):
     question = orm_relationship("Question", back_populates="review_attempts")
     concept = orm_relationship("Concept", back_populates="review_attempts")
     relationship = orm_relationship("Relationship", back_populates="review_attempts")
+
+
+class GraphView(Base):
+    __tablename__ = "graph_views"
+
+    id = Column(Integer, primary_key=True, index=True)
+    root_concept_id = Column(Integer, ForeignKey("concepts.id"), nullable=False, index=True)
+    name = Column(String(140), nullable=False, default="Overview")
+    view_type = Column(String(40), nullable=False, default="personal")
+    sort_order = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+    nodes = orm_relationship(
+        "GraphViewNode",
+        back_populates="view",
+        cascade="all, delete-orphan",
+        order_by="GraphViewNode.id",
+    )
+    edges = orm_relationship(
+        "GraphViewEdge",
+        back_populates="view",
+        cascade="all, delete-orphan",
+        order_by="GraphViewEdge.id",
+    )
+
+
+class GraphViewNode(Base):
+    __tablename__ = "graph_view_nodes"
+    __table_args__ = (UniqueConstraint("graph_view_id", "concept_id", name="uq_graph_view_node_concept"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    graph_view_id = Column(Integer, ForeignKey("graph_views.id"), nullable=False, index=True)
+    concept_id = Column(Integer, ForeignKey("concepts.id"), nullable=True, index=True)
+    label = Column(String(140), nullable=False)
+    node_type = Column(String(20), nullable=False, default="note")
+    x = Column(Float, nullable=False, default=0.0)
+    y = Column(Float, nullable=False, default=0.0)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+    view = orm_relationship("GraphView", back_populates="nodes")
+    concept = orm_relationship("Concept")
+    outgoing_edges = orm_relationship(
+        "GraphViewEdge",
+        back_populates="source_node",
+        cascade="all, delete-orphan",
+        foreign_keys="GraphViewEdge.source_view_node_id",
+    )
+    incoming_edges = orm_relationship(
+        "GraphViewEdge",
+        back_populates="target_node",
+        cascade="all, delete-orphan",
+        foreign_keys="GraphViewEdge.target_view_node_id",
+    )
+
+
+class GraphViewEdge(Base):
+    __tablename__ = "graph_view_edges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    graph_view_id = Column(Integer, ForeignKey("graph_views.id"), nullable=False, index=True)
+    source_view_node_id = Column(Integer, ForeignKey("graph_view_nodes.id"), nullable=False, index=True)
+    target_view_node_id = Column(Integer, ForeignKey("graph_view_nodes.id"), nullable=False, index=True)
+    label = Column(String(140), nullable=True)
+    relationship_type = Column(String(60), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+    view = orm_relationship("GraphView", back_populates="edges")
+    source_node = orm_relationship(
+        "GraphViewNode", back_populates="outgoing_edges", foreign_keys=[source_view_node_id]
+    )
+    target_node = orm_relationship(
+        "GraphViewNode", back_populates="incoming_edges", foreign_keys=[target_view_node_id]
+    )

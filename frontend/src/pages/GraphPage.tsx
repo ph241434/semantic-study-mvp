@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { api } from '../api/client';
-import { GraphCanvas, type StudyHidden } from '../components/GraphCanvas';
+import { type StudyHidden } from '../components/GraphCanvas';
+import { PersonalGraphPane, type PersonalGraphPaneHandle } from '../components/PersonalGraphPane';
+import { SourceGraphPane } from '../components/SourceGraphPane';
 import { isLeafGraph } from '../graph/layout';
 import type { FilesystemBreadcrumbSegment, GraphResponse, Relationship, TrailEntry } from '../types';
 
@@ -84,6 +86,7 @@ export function GraphPage({
   const [descriptionPopover, setDescriptionPopover] = useState<DescriptionPopover | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const personalPaneRef = useRef<PersonalGraphPaneHandle>(null);
 
   useEffect(() => {
     let active = true;
@@ -159,6 +162,13 @@ export function GraphPage({
     }
   }
 
+  function handleAddToPersonalView(conceptId: number) {
+    if (!graph) return;
+    const concept = graph.nodes.find((node) => node.id === conceptId);
+    if (!concept) return;
+    personalPaneRef.current?.addConceptNode({ id: concept.id, name: concept.name });
+  }
+
   function changeMode(nextMode: Mode) {
     setMode(nextMode);
     setStudyIndex(0);
@@ -218,50 +228,23 @@ export function GraphPage({
         </div>
       </header>
 
-      <main className="proto-main">
-        {error && (
-          <p className="proto-status proto-status-error" data-testid="graph-error">
-            {error}
-          </p>
-        )}
-        {!error && loading && (
-          <p className="proto-status" data-testid="graph-loading">
-            Loading…
-          </p>
-        )}
-        {!error && !loading && graph && isLeaf && rootConcept && (
-          <div className="proto-leaf" data-testid="graph-leaf">
-            <h1 className="proto-leaf-title">{rootConcept.name}</h1>
-            <p className="proto-leaf-desc">{rootConcept.description || 'No description yet.'}</p>
-          </div>
-        )}
-        {!error && !loading && graph && !isLeaf && (
-          <GraphCanvas
-            graph={graph}
-            rootId={rootId}
-            hidden={hidden}
-            linkedConceptIds={linkedConceptIds}
-            onSelectConcept={handleSelectConcept}
-          />
-        )}
-
-        {descriptionPopover && (
-          <div className="proto-description-panel" data-testid="graph-description-panel">
-            <div className="proto-description-panel-header">
-              <h2>{descriptionPopover.name}</h2>
-              <button
-                type="button"
-                className="proto-description-panel-close"
-                onClick={() => setDescriptionPopover(null)}
-                aria-label="Close"
-              >
-                {'×'}
-              </button>
-            </div>
-            <p>{descriptionPopover.description || 'No description yet.'}</p>
-          </div>
-        )}
-      </main>
+      <div className="proto-main proto-split">
+        <SourceGraphPane
+          loading={loading}
+          error={error}
+          graph={graph}
+          isLeaf={isLeaf}
+          rootId={rootId}
+          rootConcept={rootConcept}
+          hidden={hidden}
+          linkedConceptIds={linkedConceptIds}
+          onSelectConcept={handleSelectConcept}
+          onAddToPersonalView={handleAddToPersonalView}
+          descriptionPopover={descriptionPopover}
+          onCloseDescriptionPopover={() => setDescriptionPopover(null)}
+        />
+        <PersonalGraphPane ref={personalPaneRef} rootId={rootId} />
+      </div>
 
       {mode === 'study' && activePrompt && (
         <div className="proto-study-bar" data-testid="graph-study-bar">

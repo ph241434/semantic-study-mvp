@@ -220,6 +220,88 @@ class GraphResponse(BaseModel):
     relationships: list[RelationshipRead]
 
 
+GraphViewNodeType = Literal["concept", "note"]
+
+
+class GraphViewBase(BaseModel):
+    name: str = Field(min_length=1, max_length=140)
+    view_type: str = "personal"
+
+
+class GraphViewCreate(GraphViewBase):
+    root_concept_id: int
+    sort_order: int = 0
+
+
+class GraphViewUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=140)
+    sort_order: int | None = None
+
+
+class GraphViewRead(GraphViewBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    root_concept_id: int
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class GraphViewNodeCreate(BaseModel):
+    concept_id: int | None = None
+    label: str = Field(min_length=1, max_length=140)
+    node_type: GraphViewNodeType = "note"
+    x: float = 0.0
+    y: float = 0.0
+
+
+class GraphViewNodeUpdate(BaseModel):
+    label: str | None = Field(default=None, min_length=1, max_length=140)
+    x: float | None = None
+    y: float | None = None
+
+
+class GraphViewNodeRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    graph_view_id: int
+    concept_id: int | None
+    label: str
+    node_type: GraphViewNodeType
+    x: float
+    y: float
+
+
+class GraphViewEdgeCreate(BaseModel):
+    source_view_node_id: int
+    target_view_node_id: int
+    label: str | None = None
+    relationship_type: str | None = None
+
+
+class GraphViewEdgeUpdate(BaseModel):
+    label: str | None = None
+    relationship_type: str | None = None
+
+
+class GraphViewEdgeRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    graph_view_id: int
+    source_view_node_id: int
+    target_view_node_id: int
+    label: str | None
+    relationship_type: str | None
+
+
+class GraphViewDetail(GraphViewRead):
+    nodes: list[GraphViewNodeRead]
+    edges: list[GraphViewEdgeRead]
+
+
 class ReconstructionResponse(BaseModel):
     concept: ConceptRead
     question: QuestionRead

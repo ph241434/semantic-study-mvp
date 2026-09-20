@@ -1,0 +1,242 @@
+{
+  "space": "Dev Example: Feature Delivery",
+  "space_description": "Development-only example. Load with `python -m app.dev_examples`.",
+  "flowcharts": [
+    {
+      "key": "delivery",
+      "name": "Software feature delivery",
+      "description": "From a user need to a monitored deployment.",
+      "primary": true,
+      "nodes": [
+        {
+          "key": "need",
+          "label": "User need",
+          "type": "START"
+        },
+        {
+          "key": "req",
+          "label": "Define requirements",
+          "type": "PROCESS"
+        },
+        {
+          "key": "research",
+          "label": "Technical research",
+          "type": "PROCESS"
+        },
+        {
+          "key": "cons",
+          "label": "Constraints",
+          "type": "PROCESS"
+        },
+        {
+          "key": "plan",
+          "label": "Create plan",
+          "type": "PROCESS"
+        },
+        {
+          "key": "impl",
+          "label": "Implement",
+          "type": "PROCESS"
+        },
+        {
+          "key": "tests",
+          "label": "Run tests",
+          "type": "PROCESS"
+        },
+        {
+          "key": "pass",
+          "label": "Tests pass?",
+          "type": "DECISION"
+        },
+        {
+          "key": "fix",
+          "label": "Fix issue",
+          "type": "PROCESS"
+        },
+        {
+          "key": "review",
+          "label": "Code review",
+          "type": "PROCESS"
+        },
+        {
+          "key": "outcome",
+          "label": "Review outcome?",
+          "type": "DECISION"
+        },
+        {
+          "key": "revise",
+          "label": "Revise",
+          "type": "PROCESS"
+        },
+        {
+          "key": "results",
+          "label": "Test results",
+          "type": "DATA"
+        },
+        {
+          "key": "ready",
+          "label": "Ready to merge",
+          "type": "PROCESS"
+        },
+        {
+          "key": "merge",
+          "label": "Merge",
+          "type": "PROCESS"
+        },
+        {
+          "key": "deploy",
+          "label": "Deploy",
+          "type": "PROCESS"
+        },
+        {
+          "key": "monitor",
+          "label": "Monitor result",
+          "type": "PROCESS"
+        },
+        {
+          "key": "health",
+          "label": "Result?",
+          "type": "DECISION"
+        },
+        {
+          "key": "done",
+          "label": "Done",
+          "type": "END"
+        },
+        {
+          "key": "diagnose",
+          "label": "Diagnose",
+          "type": "PROCESS"
+        }
+      ],
+      "edges": [
+        {
+          "from": "need",
+          "to": "req",
+          "type": "NEXT"
+        },
+        {
+          "from": "req",
+          "to": "research",
+          "type": "NEXT"
+        },
+        {
+          "from": "req",
+          "to": "cons",
+          "type": "NEXT"
+        },
+        {
+          "from": "research",
+          "to": "plan",
+          "type": "NEXT"
+        },
+        {
+          "from": "cons",
+          "to": "plan",
+          "type": "NEXT"
+        },
+        {
+          "from": "plan",
+          "to": "impl",
+          "type": "NEXT"
+        },
+        {
+          "from": "impl",
+          "to": "tests",
+          "type": "NEXT"
+        },
+        {
+          "from": "tests",
+          "to": "pass",
+          "type": "NEXT"
+        },
+        {
+          "from": "tests",
+          "to": "results",
+          "type": "NEXT"
+        },
+        {
+          "from": "pass",
+          "to": "review",
+          "type": "SUCCESS",
+          "label": "PASS"
+        },
+        {
+          "from": "pass",
+          "to": "fix",
+          "type": "FAILURE",
+          "label": "FAIL"
+        },
+        {
+          "from": "fix",
+          "to": "tests",
+          "type": "RETRY"
+        },
+        {
+          "from": "review",
+          "to": "outcome",
+          "type": "NEXT"
+        },
+        {
+          "from": "outcome",
+          "to": "ready",
+          "type": "YES",
+          "label": "APPROVE"
+        },
+        {
+          "from": "outcome",
+          "to": "revise",
+          "type": "NO",
+          "label": "CHANGES"
+        },
+        {
+          "from": "revise",
+          "to": "tests",
+          "type": "RETRY"
+        },
+        {
+          "from": "results",
+          "to": "ready",
+          "type": "NEXT"
+        },
+        {
+          "from": "ready",
+          "to": "merge",
+          "type": "NEXT"
+        },
+        {
+          "from": "merge",
+          "to": "deploy",
+          "type": "NEXT"
+        },
+        {
+          "from": "deploy",
+          "to": "monitor",
+          "type": "NEXT"
+        },
+        {
+          "from": "monitor",
+          "to": "health",
+          "type": "NEXT"
+        },
+        {
+          "from": "health",
+          "to": "done",
+          "type": "SUCCESS",
+          "label": "GOOD"
+        },
+        {
+          "from": "health",
+          "to": "diagnose",
+          "type": "FAILURE",
+          "label": "ISSUE"
+        },
+        {
+          "from": "diagnose",
+          "to": "impl",
+          "type": "RETRY"
+        }
+      ]
+    }
+  ]
+}

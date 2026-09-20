@@ -19,7 +19,14 @@ def get_concept(db: Session, concept_id: int) -> models.Concept | None:
 
 
 def create_concept(db: Session, concept_in: schemas.ConceptCreate) -> models.Concept:
-    concept = models.Concept(**concept_in.model_dump())
+    data = concept_in.model_dump()
+    topic_id = data.pop("topic_id", None)
+    concept = models.Concept(**data)
+    if topic_id is not None:
+        topic = get_topic(db, topic_id)
+        if topic is None:
+            raise ValueError("topic_id does not exist")
+        concept.topics.append(topic)
     db.add(concept)
     db.commit()
     db.refresh(concept)
@@ -36,6 +43,9 @@ def update_concept(db: Session, concept: models.Concept, concept_in: schemas.Con
 
 
 def delete_concept(db: Session, concept: models.Concept) -> None:
+    # Flowchart nodes keep their local label/description; they just lose the concept link.
+    db.query(models.FlowNode).filter(models.FlowNode.concept_id == concept.id).update({"concept_id": None})
+    db.expire_all()
     db.delete(concept)
     db.commit()
 
@@ -49,6 +59,53 @@ def search_concepts(db: Session, query: str, limit: int = 12) -> list[models.Con
         .limit(limit)
         .all()
     )
+
+
+def list_knowledge_spaces(db: Session) -> list[models.KnowledgeSpace]:
+    return db.query(models.KnowledgeSpace).order_by(models.KnowledgeSpace.name.asc()).all()
+
+
+def get_knowledge_space(db: Session, space_id: int) -> models.KnowledgeSpace | None:
+    return db.query(models.KnowledgeSpace).filter(models.KnowledgeSpace.id == space_id).first()
+
+
+def create_knowledge_space(
+    db: Session,
+    space_in: schemas.KnowledgeSpaceCreate,
+) -> models.KnowledgeSpace:
+    space = models.KnowledgeSpace(**space_in.model_dump())
+    db.add(space)
+    db.commit()
+    db.refresh(space)
+    return space
+
+
+def list_topics(db: Session, knowledge_space_id: int | None = None) -> list[models.Topic]:
+    query = db.query(models.Topic)
+    if knowledge_space_id is not None:
+        query = query.filter(models.Topic.knowledge_space_id == knowledge_space_id)
+    return query.order_by(models.Topic.name.asc()).all()
+
+
+def get_topic(db: Session, topic_id: int) -> models.Topic | None:
+    return db.query(models.Topic).filter(models.Topic.id == topic_id).first()
+
+
+def create_topic(db: Session, topic_in: schemas.TopicCreate) -> models.Topic:
+    if get_knowledge_space(db, topic_in.knowledge_space_id) is None:
+        raise ValueError("knowledge_space_id does not exist")
+    if topic_in.parent_topic_id is not None:
+        parent = get_topic(db, topic_in.parent_topic_id)
+        if parent is None:
+            raise ValueError("parent_topic_id does not exist")
+        if parent.knowledge_space_id != topic_in.knowledge_space_id:
+            raise ValueError("parent topic must be in the same knowledge space")
+
+    topic = models.Topic(**topic_in.model_dump())
+    db.add(topic)
+    db.commit()
+    db.refresh(topic)
+    return topic
 
 
 def list_relationships(db: Session) -> list[models.Relationship]:

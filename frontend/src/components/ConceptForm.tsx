@@ -17,9 +17,10 @@ const conceptTypes: ConceptType[] = [
 
 type Props = {
   onCreated: (concept: Concept) => void;
+  topicId?: number | null;
 };
 
-export function ConceptForm({ onCreated }: Props) {
+export function ConceptForm({ onCreated, topicId = null }: Props) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [conceptType, setConceptType] = useState<ConceptType>('concept');
@@ -36,6 +37,7 @@ export function ConceptForm({ onCreated }: Props) {
         name,
         description,
         concept_type: conceptType,
+        topic_id: topicId,
       });
       setName('');
       setDescription('');

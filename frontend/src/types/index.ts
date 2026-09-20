@@ -24,6 +24,24 @@ export type Concept = {
   review_interval_days: number;
 };
 
+export type KnowledgeSpace = {
+  id: number;
+  name: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Topic = {
+  id: number;
+  knowledge_space_id: number;
+  parent_topic_id: number | null;
+  name: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Relationship = {
   id: number;
   source_concept_id: number;
@@ -80,6 +98,48 @@ export type GraphResponse = {
   relationships: Relationship[];
 };
 
+export type KnowledgeHomeResponse = {
+  spaces: KnowledgeSpace[];
+};
+
+export type KnowledgeSpaceGraphResponse = {
+  space: KnowledgeSpace;
+  topics: Topic[];
+  topic_connections: TopicConnection[];
+};
+
+export type TopicConnection = {
+  source_topic_id: number;
+  target_topic_id: number;
+  relationship_count: number;
+  relationship_types: string[];
+};
+
+export type BoundaryConcept = {
+  concept: Concept;
+  topic: Topic | null;
+};
+
+export type TopicGraphResponse = {
+  space: KnowledgeSpace;
+  topic: Topic;
+  ancestors: Topic[];
+  child_topics: Topic[];
+  concepts: Concept[];
+  boundary_concepts: BoundaryConcept[];
+  relationships: Relationship[];
+};
+
+export type KnowledgeSearchResult = {
+  entity_type: 'knowledge-space' | 'topic' | 'concept';
+  id: number;
+  label: string;
+  path: string[];
+  knowledge_space_id: number | null;
+  topic_id: number | null;
+  concept_id: number | null;
+};
+
 export type DashboardCard = {
   id: number;
   label: string;
@@ -114,3 +174,58 @@ export type ReconstructionResponse = {
   graph: GraphResponse;
 };
 
+
+export type FlowNodeType =
+  | 'START'
+  | 'END'
+  | 'PROCESS'
+  | 'DECISION'
+  | 'INPUT_OUTPUT'
+  | 'SUBPROCESS'
+  | 'EXTERNAL_SYSTEM'
+  | 'DATA';
+
+export type FlowEdgeType = 'NEXT' | 'YES' | 'NO' | 'SUCCESS' | 'FAILURE' | 'RETRY';
+
+export type FlowchartSummary = {
+  id: number;
+  name: string;
+  description: string;
+  knowledge_space_id: number | null;
+  is_primary: boolean;
+  node_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FlowNode = {
+  id: number;
+  flowchart_id: number;
+  concept_id: number | null;
+  concept_name: string | null;
+  concept_description: string | null;
+  label: string;
+  description: string;
+  node_type: FlowNodeType;
+  child_flowchart_id: number | null;
+  child_flowchart_name: string | null;
+  has_child: boolean;
+  pos_x: number | null;
+  pos_y: number | null;
+};
+
+export type FlowEdge = {
+  id: number;
+  flowchart_id: number;
+  source_node_id: number;
+  target_node_id: number;
+  edge_type: FlowEdgeType;
+  label: string | null;
+  description: string | null;
+};
+
+export type FlowchartDetail = {
+  flowchart: FlowchartSummary;
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+};

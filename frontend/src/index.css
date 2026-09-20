@@ -56,6 +56,252 @@ textarea {
   color: #f8f7f2;
 }
 
+.graph-workspace-cytoscape {
+  background-image:
+    linear-gradient(90deg, rgba(248, 247, 242, 0.035) 1px, transparent 1px),
+    linear-gradient(rgba(248, 247, 242, 0.035) 1px, transparent 1px),
+    linear-gradient(180deg, #111821 0%, #090b0f 56%, #0d1413 100%);
+  background-size: 28px 28px, 28px 28px, auto;
+}
+
+.cytoscape-graph {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.graph-top-overlay,
+.graph-action-overlay {
+  position: absolute;
+  z-index: 30;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(15, 18, 23, 0.82);
+  box-shadow: 0 18px 54px rgba(4, 6, 8, 0.44);
+  color: #f8f7f2;
+  backdrop-filter: blur(14px);
+}
+
+.graph-top-overlay {
+  left: 16px;
+  top: 16px;
+  display: grid;
+  width: min(520px, calc(100vw - 32px));
+  gap: 10px;
+  padding: 12px;
+}
+
+.graph-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.graph-breadcrumb {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  color: rgba(248, 247, 242, 0.58);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.graph-breadcrumb-item {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+
+.graph-breadcrumb button {
+  max-width: 160px;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-breadcrumb button:hover {
+  color: #ffffff;
+}
+
+.graph-breadcrumb-separator {
+  color: rgba(248, 247, 242, 0.28);
+}
+
+.graph-action-overlay {
+  right: 16px;
+  top: 16px;
+  display: grid;
+  width: min(300px, calc(100vw - 32px));
+  gap: 10px;
+  padding: 12px;
+}
+
+.graph-knowledge-search {
+  position: relative;
+}
+
+.graph-knowledge-search label {
+  display: flex;
+  height: 40px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(248, 247, 242, 0.66);
+  padding: 0 10px;
+}
+
+.graph-knowledge-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: #f8f7f2;
+  font-size: 13px;
+  outline: none;
+}
+
+.graph-knowledge-search input::placeholder {
+  color: rgba(248, 247, 242, 0.42);
+}
+
+.graph-search-results {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 70;
+  display: grid;
+  max-height: 280px;
+  gap: 4px;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  background: rgba(13, 16, 20, 0.96);
+  padding: 6px;
+  box-shadow: 0 18px 44px rgba(4, 6, 8, 0.5);
+}
+
+.graph-search-results button {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #f8f7f2;
+  padding: 7px;
+  text-align: left;
+}
+
+.graph-search-results button:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.graph-search-results span,
+.graph-search-results small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-search-results small,
+.graph-search-error {
+  color: rgba(248, 247, 242, 0.5);
+  font-size: 12px;
+}
+
+.graph-mini-nav {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.graph-mini-nav button {
+  min-width: 0;
+  height: 30px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.055);
+  color: rgba(248, 247, 242, 0.72);
+  font-size: 12px;
+  font-weight: 800;
+  padding: 0 7px;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.graph-mini-nav-active {
+  border-color: rgba(56, 216, 204, 0.38) !important;
+  color: #38d8cc !important;
+}
+
+.graph-empty-state {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 25;
+  transform: translate(-50%, -50%);
+}
+
+.graph-empty-state button,
+.graph-boundary-topic-button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(56, 216, 204, 0.34);
+  border-radius: 7px;
+  background: rgba(39, 116, 109, 0.28);
+  color: #f8f7f2;
+  font-size: 14px;
+  font-weight: 800;
+  padding: 0 12px;
+}
+
+.graph-floating-inspector {
+  z-index: 50;
+}
+
+.graph-boundary-topic-button {
+  width: calc(100% - 44px);
+  justify-content: flex-start;
+  margin: 0 0 10px;
+}
+
+@media (max-width: 820px) {
+  .graph-top-overlay,
+  .graph-action-overlay {
+    left: 16px;
+    right: 16px;
+    width: auto;
+  }
+
+  .graph-action-overlay {
+    top: auto;
+    bottom: 16px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .graph-knowledge-search,
+  .graph-mini-nav {
+    grid-column: 1 / -1;
+  }
+}
+
 .graph-shell-workspace,
 .graph-shell-workspace .react-flow {
   width: 100%;
@@ -589,3 +835,155 @@ textarea {
   }
 }
 
+
+/* Flowchart workspace ------------------------------------------------------ */
+.graph-workspace-flow {
+  background-image: linear-gradient(180deg, #111821 0%, #090b0f 56%, #0d1413 100%);
+}
+
+/* The grid is painted on the canvas wrapper and driven by the Cytoscape viewport (pan / zoom),
+   so nodes stay fixed to the graph paper while the view moves. */
+.flow-canvas {
+  --grid-size: 28px;
+  --grid-x: 0px;
+  --grid-y: 0px;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background-image:
+    linear-gradient(90deg, rgba(248, 247, 242, 0.05) 1px, transparent 1px),
+    linear-gradient(rgba(248, 247, 242, 0.05) 1px, transparent 1px);
+  background-size: var(--grid-size) var(--grid-size);
+  background-position: var(--grid-x) var(--grid-y);
+}
+
+.flow-canvas-cy {
+  position: absolute;
+  inset: 0;
+}
+
+.flow-navigator,
+.flow-navigator-toggle {
+  position: absolute;
+  left: 16px;
+  z-index: 30;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(15, 18, 23, 0.82);
+  box-shadow: 0 18px 54px rgba(4, 6, 8, 0.44);
+  color: #f8f7f2;
+  backdrop-filter: blur(14px);
+}
+
+.flow-navigator {
+  top: 184px;
+  bottom: 16px;
+  display: flex;
+  width: 236px;
+  flex-direction: column;
+  font-size: 13px;
+}
+
+.flow-navigator-toggle {
+  top: 184px;
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+}
+
+.flow-navigator-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 6px;
+  color: rgba(248, 247, 242, 0.55);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.flow-navigator-header button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.flow-navigator-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 0 6px 8px;
+}
+
+.flow-navigator-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: rgba(248, 247, 242, 0.82);
+  cursor: pointer;
+  padding: 5px 8px;
+  text-align: left;
+}
+
+.flow-navigator-row:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.flow-navigator-file {
+  padding-left: 26px;
+}
+
+.flow-navigator-active {
+  background: rgba(56, 216, 204, 0.16);
+  color: #ffffff;
+}
+
+.flow-navigator-badge {
+  margin-left: auto;
+  border-radius: 4px;
+  background: rgba(56, 216, 204, 0.18);
+  color: #38d8cc;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 5px;
+  text-transform: uppercase;
+}
+
+.flow-navigator-section {
+  margin: 10px 8px 4px;
+  color: rgba(248, 247, 242, 0.55);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.flow-navigator-search {
+  width: calc(100% - 12px);
+  margin: 0 6px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f8f7f2;
+  padding: 5px 8px;
+}
+
+.flow-navigator-empty {
+  padding: 6px 8px;
+  color: rgba(248, 247, 242, 0.5);
+}
+
+@media (max-width: 820px) {
+  .flow-navigator {
+    top: auto;
+    bottom: 16px;
+    max-height: 40vh;
+  }
+}

@@ -3,315 +3,314 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ClassicPositionStore, GraphLayoutMode, GraphLayoutResult, Point } from '../graph/layout';
-import type { Concept, GraphResponse, Question, Relationship } from '../types';
+import type { Concept, FlowNode, FlowchartDetail, FlowchartSummary, KnowledgeSpace, Relationship } from '../types';
 
-vi.mock('../components/GraphCanvas', () => ({
-  GraphCanvas: ({
-    graph,
-    layout,
-    onSelectConcept,
-    onSelectRelationship,
-    onNodePositionChange,
-    onPaneClick,
-    variant,
-    showGrid,
-    layoutMode,
-    viewportRevision,
+// The real canvas needs a browser canvas; here it just reports what it was asked to draw.
+vi.mock('../flowchart/FlowchartCanvas', () => ({
+  FlowchartCanvas: ({
+    detail,
+    layoutRevision,
+    selectedNodeId,
+    onNodeTap,
+    onNodeMoved,
   }: {
-    graph: GraphResponse | null;
-    layout: GraphLayoutResult | null;
-    classicPositions: ClassicPositionStore;
-    onSelectConcept: (conceptId: number) => void;
-    onSelectRelationship: (relationshipId: number) => void;
-    onNodePositionChange?: (conceptId: number, position: Point) => void;
-    onPaneClick: () => void;
-    variant: string;
-    showGrid: boolean;
-    layoutMode: GraphLayoutMode;
-    viewportRevision: number;
-  }) => {
-    const nodeTwo = layout?.nodes.find((node) => node.conceptId === 2);
-
-    return (
-      <div
-        data-testid="mock-graph-canvas"
-        data-variant={variant}
-        data-grid={String(showGrid)}
-        data-layout={layoutMode}
-        data-viewport-revision={viewportRevision}
-        data-node-count={graph?.nodes.length ?? 0}
-        data-node-two-x={nodeTwo?.position.x ?? ''}
-        data-node-two-y={nodeTwo?.position.y ?? ''}
-      >
-        <button type="button" onClick={() => onSelectConcept(2)}>
-          Select mock node
+    detail: FlowchartDetail | null;
+    layoutRevision: number;
+    selectedNodeId?: number | null;
+    onNodeTap: (nodeId: number) => void;
+    onNodeMoved?: (nodeId: number, position: { x: number; y: number }) => void;
+  }) => (
+    <div
+      data-testid="mock-canvas"
+      data-flowchart-id={detail?.flowchart.id ?? ''}
+      data-node-count={detail?.nodes.length ?? 0}
+      data-edge-count={detail?.edges.length ?? 0}
+      data-selected={selectedNodeId ?? ''}
+      data-revision={layoutRevision}
+    >
+      {(detail?.nodes ?? []).map((node) => (
+        <button key={node.id} type="button" data-node-id={node.id} onClick={() => onNodeTap(node.id)}>
+          {node.label}
         </button>
-        <button type="button" onClick={() => onSelectRelationship(10)}>
-          Select mock edge
-        </button>
-        <button type="button" onClick={() => onNodePositionChange?.(2, { x: 120, y: 144 })}>
-          Drag mock node
-        </button>
-        <button type="button" onClick={onPaneClick}>
-          Click empty canvas
-        </button>
-      </div>
-    );
-  },
+      ))}
+      <button type="button" onClick={() => onNodeMoved?.(detail?.nodes[0]?.id ?? 0, { x: 12, y: 34 })}>
+        drag first node
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock('../api/client', () => ({
   api: {
-    graph: vi.fn(),
-    search: vi.fn().mockResolvedValue([]),
+    knowledgeSpaces: vi.fn(),
+    flowcharts: vi.fn(),
+    flowchart: vi.fn(),
+    createChildFlowchart: vi.fn(),
+    createFlowEdge: vi.fn(),
+    createFlowNode: vi.fn(),
+    createFlowchart: vi.fn(),
+    createKnowledgeSpace: vi.fn(),
+    updateFlowNode: vi.fn(),
+    updateFlowEdge: vi.fn(),
+    deleteFlowNode: vi.fn(),
+    deleteFlowEdge: vi.fn(),
+    reorganizeFlowchart: vi.fn(),
     updateConcept: vi.fn(),
     updateRelationship: vi.fn(),
-    deleteRelationship: vi.fn(),
-    createConcept: vi.fn(),
-    createRelationship: vi.fn(),
   },
 }));
 
 import { api } from '../api/client';
-import { CLASSIC_LAYOUT_STORAGE_KEY, clearGraphLayoutCaches, getGraphLayoutCacheStats } from '../graph/layout';
 import { GraphPage } from './GraphPage';
 
-const concepts = [concept(1, "Dijkstra's Algorithm", 'algorithm'), concept(2, 'Priority Queue', 'definition')];
-const relationships = [relationship(10, 1, 2, 'USES')];
-const questions = [question(100, 1, null), question(101, null, 10)];
+const aesGcm = concept(1, 'AES-GCM', 'Authenticated encryption mode.');
+const nonce = concept(2, 'Nonce', '');
+const semantic: Relationship[] = [
+  {
+    id: 100,
+    source_concept_id: 1,
+    target_concept_id: 2,
+    relationship_type: 'USES',
+    description: '',
+    mastery_score: 0,
+    confidence: 0.3,
+    created_at: '',
+    updated_at: '',
+    last_reviewed_at: null,
+    next_review_at: null,
+    review_interval_days: 1,
+    source_name: 'AES-GCM',
+    target_name: 'Nonce',
+  },
+];
 
-function concept(id: number, name: string, conceptType: Concept['concept_type']): Concept {
+const space: KnowledgeSpace = { id: 1, name: 'Gmail E2EE', description: '', created_at: '', updated_at: '' };
+const summaries: FlowchartSummary[] = [
+  summary(1, 'Gmail Encryption System', true),
+  summary(2, 'Encryption Process', false),
+];
+
+const project = detail(
+  summary(1, 'Gmail Encryption System', true),
+  [
+    node(10, 1, 'Write message', 'START'),
+    node(11, 1, 'Encrypt message', 'SUBPROCESS', {
+      description: "Encrypts the user's plaintext locally before Gmail receives the message.",
+      concept_id: 1,
+      concept_name: 'AES-GCM',
+      child_flowchart_id: 2,
+      child_flowchart_name: 'Encryption Process',
+      has_child: true,
+    }),
+    node(12, 1, 'Valid?', 'DECISION'),
+    node(13, 1, 'Send', 'END'),
+  ],
+);
+const encryption = detail(summary(2, 'Encryption Process', false), [node(20, 2, 'Generate nonce', 'PROCESS'), node(21, 2, 'AES-GCM encrypt', 'PROCESS')]);
+
+function concept(id: number, name: string, description: string): Concept {
   return {
     id,
     name,
-    description: `${name} description`,
-    concept_type: conceptType,
-    mastery_score: 0.5,
-    confidence: 0.4,
-    created_at: '2026-09-09T00:00:00Z',
-    updated_at: '2026-09-09T00:00:00Z',
+    description,
+    concept_type: 'mechanism',
+    mastery_score: 0,
+    confidence: 0.3,
+    created_at: '',
+    updated_at: '',
     last_reviewed_at: null,
     next_review_at: null,
     review_interval_days: 1,
   };
 }
 
-function relationship(id: number, sourceId: number, targetId: number, relationshipType: string): Relationship {
+function summary(id: number, name: string, primary: boolean): FlowchartSummary {
+  return { id, name, description: '', knowledge_space_id: 1, is_primary: primary, node_count: 0, created_at: '', updated_at: '' };
+}
+
+function node(id: number, flowchartId: number, label: string, type: FlowNode['node_type'], extra: Partial<FlowNode> = {}): FlowNode {
   return {
     id,
-    source_concept_id: sourceId,
-    target_concept_id: targetId,
-    relationship_type: relationshipType,
-    description: `${relationshipType} description`,
-    mastery_score: 0.6,
-    confidence: 0.5,
-    created_at: '2026-09-09T00:00:00Z',
-    updated_at: '2026-09-09T00:00:00Z',
-    last_reviewed_at: null,
-    next_review_at: null,
-    review_interval_days: 1,
-    source_name: "Dijkstra's Algorithm",
-    target_name: 'Priority Queue',
+    flowchart_id: flowchartId,
+    concept_id: null,
+    concept_name: null,
+    concept_description: null,
+    label,
+    description: '',
+    node_type: type,
+    child_flowchart_id: null,
+    child_flowchart_name: null,
+    has_child: false,
+    pos_x: null,
+    pos_y: null,
+    ...extra,
   };
 }
 
-function question(id: number, conceptId: number | null, relationshipId: number | null): Question {
-  return {
-    id,
-    question_text: `Question ${id}`,
-    answer_text: 'Answer',
-    question_type: 'CONCEPT_RECALL',
-    difficulty: 2,
-    concept_id: conceptId,
-    relationship_id: relationshipId,
-    created_at: '2026-09-09T00:00:00Z',
-  };
+function detail(flowchart: FlowchartSummary, nodes: FlowNode[]): FlowchartDetail {
+  const edges = nodes.slice(1).map((target, index) => ({
+    id: flowchart.id * 100 + index,
+    flowchart_id: flowchart.id,
+    source_node_id: nodes[index].id,
+    target_node_id: target.id,
+    edge_type: 'NEXT' as const,
+    label: null,
+    description: null,
+  }));
+  return { flowchart: { ...flowchart, node_count: nodes.length }, nodes, edges };
 }
 
-function Harness({ onChangeView = vi.fn() }: { onChangeView?: (view: 'dashboard' | 'graph' | 'study' | 'reconstruction') => void }) {
-  const [selectedConceptId, setSelectedConceptId] = useState<number | null>(1);
-  const [selectedRelationshipId, setSelectedRelationshipId] = useState<number | null>(null);
-
+function Harness() {
+  const [, setSelectedConceptId] = useState<number | null>(null);
   return (
     <GraphPage
-      concepts={concepts}
-      relationships={relationships}
-      questions={questions}
-      selectedConceptId={selectedConceptId}
-      selectedRelationshipId={selectedRelationshipId}
+      concepts={[aesGcm, nonce]}
+      relationships={semantic}
+      questions={[]}
+      selectedConceptId={null}
+      selectedRelationshipId={null}
       currentView="graph"
-      onChangeView={onChangeView}
-      onSelectConcept={setSelectedConceptId}
-      onSelectRelationship={setSelectedRelationshipId}
       onCatalogChanged={async () => undefined}
+      onChangeView={vi.fn()}
+      onSelectConcept={setSelectedConceptId}
+      onSelectRelationship={vi.fn()}
       onStudyQuestion={vi.fn()}
     />
   );
 }
 
-describe('GraphPage classic graph workspace', () => {
+const canvas = () => screen.getByTestId('mock-canvas');
+const breadcrumb = () => screen.getByLabelText('Flowchart breadcrumb');
+
+describe('GraphPage hierarchical flowcharts', () => {
   beforeEach(() => {
-    window.localStorage.clear();
-    clearGraphLayoutCaches();
+    window.history.replaceState(null, '', '/');
     vi.clearAllMocks();
-    vi.mocked(api.graph).mockImplementation(async (conceptId: number, depth: number) => ({
-      center_id: conceptId,
-      depth,
-      nodes: concepts,
-      relationships,
-    }));
+    vi.mocked(api.knowledgeSpaces).mockResolvedValue([space]);
+    vi.mocked(api.flowcharts).mockResolvedValue(summaries);
+    vi.mocked(api.flowchart).mockImplementation(async (id: number) => (id === 1 ? project : encryption));
+    vi.mocked(api.updateFlowNode).mockImplementation(async (id: number, patch) => ({ ...project.nodes[0], id, ...patch }) as FlowNode);
   });
 
-  afterEach(() => {
-    cleanup();
-  });
+  afterEach(cleanup);
 
-  it('renders the graph as the full workspace surface with an overlaid sidebar', async () => {
+  it("opens the project's primary flowchart and lists projects, flowcharts and concepts for navigation", async () => {
     render(<Harness />);
 
-    expect(screen.getByTestId('graph-workspace')).toHaveClass('graph-workspace');
-    const canvas = await screen.findByTestId('mock-graph-canvas');
-    expect(canvas).toHaveAttribute('data-variant', 'workspace');
-    expect(canvas).toHaveAttribute('data-layout', 'classic');
-    expect(screen.getByTestId('graph-tool-rail')).toHaveAttribute('data-collapsed', 'false');
-    expect(screen.getByRole('button', { name: 'Add Concept' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add Relationship' })).toBeInTheDocument();
+    await waitFor(() => expect(canvas()).toHaveAttribute('data-flowchart-id', '1'));
+    expect(canvas()).toHaveAttribute('data-node-count', '4');
+    expect(within(breadcrumb()).getByRole('button', { name: 'Gmail Encryption System' })).toBeInTheDocument();
+    const navigator = screen.getByTestId('flow-navigator');
+    expect(within(navigator).getByText('Gmail E2EE')).toBeInTheDocument();
+    expect(within(navigator).getByRole('button', { name: /Encryption Process/ })).toBeInTheDocument();
+    expect(within(navigator).getByRole('button', { name: 'AES-GCM' })).toBeInTheDocument();
   });
 
-  it('collapses and expands the sidebar without remounting the graph content', async () => {
+  it('shows the node description in the inspector and keeps semantic relationships out of the canvas', async () => {
     render(<Harness />);
-    await waitFor(() => expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-node-count', '2'));
-    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-viewport-revision', '0');
+    await waitFor(() => expect(canvas()).toHaveAttribute('data-flowchart-id', '1'));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse Sidebar' }));
-
-    const collapsedRail = screen.getByTestId('graph-tool-rail');
-    expect(collapsedRail).toHaveAttribute('data-collapsed', 'true');
-    expect(within(collapsedRail).getByRole('button', { name: 'Add Concept' })).toBeInTheDocument();
-    expect(within(collapsedRail).getByRole('button', { name: 'Add Relationship' })).toBeInTheDocument();
-    expect(within(collapsedRail).getByRole('button', { name: 'Search' })).toBeInTheDocument();
-    expect(within(collapsedRail).getByRole('button', { name: 'Open Sidebar' })).toBeInTheDocument();
-    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-viewport-revision', '1');
-
-    fireEvent.click(within(collapsedRail).getByRole('button', { name: 'Open Sidebar' }));
-    expect(screen.getByTestId('graph-tool-rail')).toHaveAttribute('data-collapsed', 'false');
+    fireEvent.click(within(canvas()).getByRole('button', { name: 'Encrypt message' }));
+    const inspector = await screen.findByTestId('flow-inspector');
+    expect(within(inspector).getByLabelText('Step description')).toHaveValue(
+      "Encrypts the user's plaintext locally before Gmail receives the message.",
+    );
+    // The concept's global relationship is shown as supporting metadata only.
+    expect(within(inspector).getByLabelText('Semantic relationships')).toHaveTextContent('AES-GCM USES Nonce');
+    expect(canvas()).toHaveAttribute('data-edge-count', '3'); // flow edges only
   });
 
-  it('keeps quick add concept and relationship forms in compact floating dialogs', async () => {
+  it('opens an existing detailed flowchart, then returns to the parent and its selection', async () => {
     render(<Harness />);
-    await screen.findByTestId('mock-graph-canvas');
+    await waitFor(() => expect(canvas()).toHaveAttribute('data-flowchart-id', '1'));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add Concept' }));
-    expect(screen.getByRole('dialog', { name: 'Add Concept' })).toBeInTheDocument();
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Add Concept' })).getByRole('button', { name: 'Close' }));
+    fireEvent.click(within(canvas()).getByRole('button', { name: 'Encrypt message' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open detailed flowchart' }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add Relationship' }));
-    expect(screen.getByRole('dialog', { name: 'Add Relationship' })).toBeInTheDocument();
+    await waitFor(() => expect(canvas()).toHaveAttribute('data-flowchart-id', '2'));
+    expect(api.createChildFlowchart).not.toHaveBeenCalled();
+    // Only the child's nodes are drawn: nothing from the parent is layered in.
+    expect(canvas()).toHaveAttribute('data-node-count', '2');
+    expect(within(canvas()).queryByRole('button', { name: 'Write message' })).not.toBeInTheDocument();
+    expect(breadcrumb()).toHaveTextContent('Gmail Encryption System/Encryption Process');
+    expect(canvas()).toHaveAttribute('data-selected', '');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await waitFor(() => expect(canvas()).toHaveAttribute('data-flowchart-id', '1'));
+    expect(canvas()).toHaveAttribute('data-node-count', '4');
+    expect(canvas()).toHaveAttribute('data-selected', '11');
+    expect(breadcrumb()).not.toHaveTextContent('Encryption Process');
   });
 
-  it('keeps Classic controls available from the sidebar', async () => {
+  it('creates a detailed flowchart for a node that has none', async () => {
+    const created = summary(3, 'Valid?', false);
+    vi.mocked(api.createChildFlowchart).mockResolvedValue(created);
+    vi.mocked(api.flowchart).mockImplementation(async (id: number) => (id === 1 ? project : id === 3 ? detail(created, []) : encryption));
     render(<Harness />);
-    await screen.findByTestId('mock-graph-canvas');
+    await waitFor(() => expect(canvas()).toHaveAttribute('data-flowchart-id', '1'));
 
-    expect(screen.getByPlaceholderText('Search concepts')).toBeInTheDocument();
-    expect(screen.getByLabelText('Graph layout')).toHaveValue('classic');
-    expect(screen.getByRole('button', { name: 'Reorganize' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Fit Graph' }));
-    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-viewport-revision', '1');
+    fireEvent.click(within(canvas()).getByRole('button', { name: 'Valid?' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Create detailed flowchart' }));
+
+    await waitFor(() => expect(api.createChildFlowchart).toHaveBeenCalledWith(12));
+    await waitFor(() => expect(canvas()).toHaveAttribute('data-flowchart-id', '3'));
+    expect(canvas()).toHaveAttribute('data-node-count', '0');
+    expect(breadcrumb()).toHaveTextContent('Gmail Encryption System/Valid?');
   });
 
-  it('falls back to Classic when an obsolete layout preference is stored', async () => {
-    window.localStorage.setItem('semantic-study.graphLayoutMode', 'clustered');
-
+  it('navigates back through the breadcrumb', async () => {
     render(<Harness />);
-    const canvas = await screen.findByTestId('mock-graph-canvas');
+    await waitFor(() => expect(canvas()).toHaveAttribute('data-flowchart-id', '1'));
+    fireEvent.click(within(canvas()).getByRole('button', { name: 'Encrypt message' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open detailed flowchart' }));
+    await waitFor(() => expect(canvas()).toHaveAttribute('data-flowchart-id', '2'));
 
-    expect(screen.getByLabelText('Graph layout')).toHaveValue('classic');
-    expect(canvas).toHaveAttribute('data-layout', 'classic');
-    await waitFor(() => expect(window.localStorage.getItem('semantic-study.graphLayoutMode')).toBe('classic'));
+    fireEvent.click(within(breadcrumb()).getByRole('button', { name: 'Gmail Encryption System' }));
+    await waitFor(() => expect(canvas()).toHaveAttribute('data-flowchart-id', '1'));
   });
 
-  it('persists manual Classic node positions from drag callbacks', async () => {
+  it('saves a dragged node position and reorganizes on request', async () => {
+    vi.mocked(api.reorganizeFlowchart).mockResolvedValue(undefined);
     render(<Harness />);
-    await screen.findByTestId('mock-graph-canvas');
+    await waitFor(() => expect(canvas()).toHaveAttribute('data-flowchart-id', '1'));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Drag mock node' }));
-
-    await waitFor(() => {
-      const stored = readStoredClassicPositions();
-      expect(stored['2']).toEqual({ x: 120, y: 144 });
-    });
-  });
-
-  it('does not recompute layout when grid or sidebar-only state changes', async () => {
-    render(<Harness />);
-    await waitFor(() => expect(readStoredClassicPositions()['1']).toBeDefined());
-    const before = getGraphLayoutCacheStats();
-
-    fireEvent.click(screen.getByLabelText('Grid'));
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse Sidebar' }));
-
-    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-grid', 'false');
-    expect(getGraphLayoutCacheStats().layoutComputations).toBe(before.layoutComputations);
-  });
-
-  it('reorganizes Classic positions only when explicitly requested', async () => {
-    render(<Harness />);
-    await screen.findByTestId('mock-graph-canvas');
-    fireEvent.click(screen.getByRole('button', { name: 'Drag mock node' }));
-    await waitFor(() => expect(readStoredClassicPositions()['2']).toEqual({ x: 120, y: 144 }));
+    fireEvent.click(screen.getByRole('button', { name: 'drag first node' }));
+    expect(api.updateFlowNode).toHaveBeenCalledWith(10, { pos_x: 12, pos_y: 34 });
 
     fireEvent.click(screen.getByRole('button', { name: 'Reorganize' }));
-
-    await waitFor(() => {
-      const stored = readStoredClassicPositions();
-      expect(stored['2']).not.toEqual({ x: 120, y: 144 });
-    });
-    expect(getGraphLayoutCacheStats().reorganizeComputations).toBe(1);
-    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-viewport-revision', '1');
+    await waitFor(() => expect(api.reorganizeFlowchart).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(canvas()).toHaveAttribute('data-revision', '1'));
   });
 
-  it('opens the inspector from node selection and closes it from the canvas', async () => {
+  it('connects two steps and defaults decision branches to YES then NO', async () => {
+    let edgeId = 900;
+    vi.mocked(api.createFlowEdge).mockImplementation(async (_flowchartId, payload) => ({
+      id: ++edgeId,
+      flowchart_id: 1,
+      source_node_id: payload.source_node_id,
+      target_node_id: payload.target_node_id,
+      edge_type: payload.edge_type ?? 'NEXT',
+      label: payload.label ?? null,
+      description: null,
+    }));
     render(<Harness />);
-    await screen.findByTestId('mock-graph-canvas');
-    fireEvent.click(screen.getByRole('button', { name: 'Close Inspector' }));
+    await waitFor(() => expect(canvas()).toHaveAttribute('data-flowchart-id', '1'));
 
-    expect(screen.queryByTestId('graph-inspector')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Select mock node' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Connect steps' }));
+    fireEvent.click(within(canvas()).getByRole('button', { name: 'Valid?' }));
+    fireEvent.click(within(canvas()).getByRole('button', { name: 'Send' }));
 
-    expect(screen.getByTestId('graph-inspector')).toHaveTextContent('Priority Queue');
-    fireEvent.click(screen.getByRole('button', { name: 'Click empty canvas' }));
-    expect(screen.queryByTestId('graph-inspector')).not.toBeInTheDocument();
-  });
+    await waitFor(() =>
+      expect(api.createFlowEdge).toHaveBeenCalledWith(1, { source_node_id: 12, target_node_id: 13, edge_type: 'YES', label: 'YES' }),
+    );
+    await waitFor(() => expect(canvas()).toHaveAttribute('data-edge-count', '4'));
 
-  it('opens a relationship inspector with edit and delete controls', async () => {
-    render(<Harness />);
-    await screen.findByTestId('mock-graph-canvas');
-    fireEvent.click(screen.getByRole('button', { name: 'Select mock edge' }));
-
-    const inspector = screen.getByTestId('graph-inspector');
-    expect(inspector).toHaveTextContent("Dijkstra's Algorithm");
-    expect(inspector).toHaveTextContent('Priority Queue');
-    expect(within(inspector).getByRole('button', { name: 'Edit' })).toBeInTheDocument();
-    expect(within(inspector).getByRole('button', { name: 'Delete' })).toBeInTheDocument();
-  });
-
-  it('persists the sidebar and grid preferences locally', async () => {
-    const first = render(<Harness />);
-    await screen.findByTestId('mock-graph-canvas');
-    fireEvent.click(screen.getByLabelText('Grid'));
-    expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-grid', 'false');
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse Sidebar' }));
-
-    first.unmount();
-    render(<Harness />);
-
-    expect(screen.getByTestId('graph-tool-rail')).toHaveAttribute('data-collapsed', 'true');
-    await waitFor(() => expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-grid', 'false'));
+    // A second branch out of the same decision becomes NO.
+    fireEvent.click(screen.getByRole('button', { name: 'Connect steps' }));
+    fireEvent.click(within(canvas()).getByRole('button', { name: 'Valid?' }));
+    fireEvent.click(within(canvas()).getByRole('button', { name: 'Write message' }));
+    await waitFor(() =>
+      expect(api.createFlowEdge).toHaveBeenLastCalledWith(1, { source_node_id: 12, target_node_id: 10, edge_type: 'NO', label: 'NO' }),
+    );
   });
 });
-
-function readStoredClassicPositions(): ClassicPositionStore {
-  return JSON.parse(window.localStorage.getItem(CLASSIC_LAYOUT_STORAGE_KEY) ?? '{}') as ClassicPositionStore;
-}

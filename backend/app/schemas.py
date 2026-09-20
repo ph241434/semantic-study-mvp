@@ -40,6 +40,19 @@ QUESTION_TYPES = {
     "GRAPH_RECONSTRUCTION",
 }
 
+FLOW_NODE_TYPES = [
+    "START",
+    "END",
+    "PROCESS",
+    "DECISION",
+    "INPUT_OUTPUT",
+    "SUBPROCESS",
+    "EXTERNAL_SYSTEM",
+    "DATA",
+]
+
+FLOW_EDGE_TYPES = ["NEXT", "YES", "NO", "SUCCESS", "FAILURE", "RETRY"]
+
 ReviewRating = Literal["AGAIN", "HARD", "GOOD", "EASY"]
 
 
@@ -67,7 +80,7 @@ class ConceptBase(BaseModel):
 
 
 class ConceptCreate(ConceptBase):
-    pass
+    topic_id: int | None = None
 
 
 class ConceptUpdate(BaseModel):
@@ -102,6 +115,52 @@ class ConceptRead(ConceptBase):
     last_reviewed_at: datetime | None
     next_review_at: datetime | None
     review_interval_days: int
+
+
+class KnowledgeSpaceBase(BaseModel):
+    name: str = Field(min_length=1, max_length=140)
+    description: str = ""
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        return value.strip()
+
+
+class KnowledgeSpaceCreate(KnowledgeSpaceBase):
+    pass
+
+
+class KnowledgeSpaceRead(KnowledgeSpaceBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class TopicBase(BaseModel):
+    knowledge_space_id: int
+    parent_topic_id: int | None = None
+    name: str = Field(min_length=1, max_length=140)
+    description: str = ""
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        return value.strip()
+
+
+class TopicCreate(TopicBase):
+    pass
+
+
+class TopicRead(TopicBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    created_at: datetime
+    updated_at: datetime
 
 
 class RelationshipBase(BaseModel):
@@ -209,6 +268,51 @@ class GraphResponse(BaseModel):
     relationships: list[RelationshipRead]
 
 
+class KnowledgeHomeResponse(BaseModel):
+    spaces: list[KnowledgeSpaceRead]
+
+
+class TopicConnectionRead(BaseModel):
+    source_topic_id: int
+    target_topic_id: int
+    relationship_count: int
+    relationship_types: list[str]
+
+
+class KnowledgeSpaceGraphResponse(BaseModel):
+    space: KnowledgeSpaceRead
+    topics: list[TopicRead]
+    topic_connections: list[TopicConnectionRead] = []
+
+
+class BoundaryConceptRead(BaseModel):
+    concept: ConceptRead
+    topic: TopicRead | None = None
+
+
+class TopicGraphResponse(BaseModel):
+    space: KnowledgeSpaceRead
+    topic: TopicRead
+    ancestors: list[TopicRead]
+    child_topics: list[TopicRead]
+    concepts: list[ConceptRead]
+    boundary_concepts: list[BoundaryConceptRead]
+    relationships: list[RelationshipRead]
+
+
+KnowledgeSearchEntity = Literal["knowledge-space", "topic", "concept"]
+
+
+class KnowledgeSearchResult(BaseModel):
+    entity_type: KnowledgeSearchEntity
+    id: int
+    label: str
+    path: list[str]
+    knowledge_space_id: int | None = None
+    topic_id: int | None = None
+    concept_id: int | None = None
+
+
 class ReconstructionResponse(BaseModel):
     concept: ConceptRead
     question: QuestionRead
@@ -242,3 +346,147 @@ class DashboardResponse(BaseModel):
     weakest_relationships: list[DashboardCard]
     recently_studied: list[RecentReview]
 
+
+
+def _normalize_choice(value: str, allowed: list[str], field: str) -> str:
+    normalized = value.strip().upper().replace(" ", "_").replace("-", "_")
+    if normalized not in allowed:
+        raise ValueError(f"{field} must be one of: {', '.join(allowed)}")
+    return normalized
+
+
+class FlowchartCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=140)
+    description: str = ""
+    knowledge_space_id: int | None = None
+    is_primary: bool = False
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        return value.strip()
+
+
+class FlowchartUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=140)
+    description: str | None = None
+    knowledge_space_id: int | None = None
+    is_primary: bool | None = None
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else value
+
+
+class FlowchartSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    description: str
+    knowledge_space_id: int | None
+    is_primary: bool
+    node_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class FlowNodeCreate(BaseModel):
+    label: str = Field(min_length=1, max_length=140)
+    description: str = ""
+    node_type: str = "PROCESS"
+    concept_id: int | None = None
+    child_flowchart_id: int | None = None
+    pos_x: float | None = None
+    pos_y: float | None = None
+
+    @field_validator("label")
+    @classmethod
+    def clean_label(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("node_type")
+    @classmethod
+    def validate_node_type(cls, value: str) -> str:
+        return _normalize_choice(value, FLOW_NODE_TYPES, "node_type")
+
+
+class FlowNodeUpdate(BaseModel):
+    """PATCH body. Fields that are present (even as null) are applied."""
+
+    label: str | None = Field(default=None, min_length=1, max_length=140)
+    description: str | None = None
+    node_type: str | None = None
+    concept_id: int | None = None
+    child_flowchart_id: int | None = None
+    pos_x: float | None = None
+    pos_y: float | None = None
+
+    @field_validator("label")
+    @classmethod
+    def clean_label(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else value
+
+    @field_validator("node_type")
+    @classmethod
+    def validate_node_type(cls, value: str | None) -> str | None:
+        return _normalize_choice(value, FLOW_NODE_TYPES, "node_type") if value is not None else value
+
+
+class FlowNodeRead(BaseModel):
+    id: int
+    flowchart_id: int
+    concept_id: int | None
+    concept_name: str | None = None
+    concept_description: str | None = None
+    label: str
+    description: str
+    node_type: str
+    child_flowchart_id: int | None
+    child_flowchart_name: str | None = None
+    has_child: bool = False
+    pos_x: float | None
+    pos_y: float | None
+
+
+class FlowEdgeCreate(BaseModel):
+    source_node_id: int
+    target_node_id: int
+    edge_type: str = "NEXT"
+    label: str | None = None
+    description: str | None = None
+
+    @field_validator("edge_type")
+    @classmethod
+    def validate_edge_type(cls, value: str) -> str:
+        return _normalize_choice(value, FLOW_EDGE_TYPES, "edge_type")
+
+
+class FlowEdgeUpdate(BaseModel):
+    edge_type: str | None = None
+    label: str | None = None
+    description: str | None = None
+
+    @field_validator("edge_type")
+    @classmethod
+    def validate_edge_type(cls, value: str | None) -> str | None:
+        return _normalize_choice(value, FLOW_EDGE_TYPES, "edge_type") if value is not None else value
+
+
+class FlowEdgeRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    flowchart_id: int
+    source_node_id: int
+    target_node_id: int
+    edge_type: str
+    label: str | None
+    description: str | None
+
+
+class FlowchartDetail(BaseModel):
+    flowchart: FlowchartSummary
+    nodes: list[FlowNodeRead]
+    edges: list[FlowEdgeRead]

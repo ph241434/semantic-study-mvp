@@ -1,0 +1,372 @@
+{
+  "space": "Dev Example: Shortest Path Service",
+  "space_description": "Development-only example. Load with `python -m app.dev_examples`.",
+  "flowcharts": [
+    {
+      "key": "service",
+      "name": "Shortest-path service",
+      "description": "Top-level flow of a routing service.",
+      "primary": true,
+      "nodes": [
+        {
+          "key": "req",
+          "label": "Receive route request",
+          "type": "START",
+          "description": "A client asks for the cheapest route between two places."
+        },
+        {
+          "key": "map",
+          "label": "Map provider",
+          "type": "EXTERNAL_SYSTEM",
+          "description": "Third-party source of the road network."
+        },
+        {
+          "key": "load",
+          "label": "Load road network",
+          "type": "DATA",
+          "description": "Graph of intersections and weighted road segments."
+        },
+        {
+          "key": "run",
+          "label": "Run shortest-path algorithm",
+          "type": "SUBPROCESS",
+          "description": "Computes cheapest distances from the start vertex. Open for details.",
+          "child": "dijkstra",
+          "concept": "Dijkstra's Algorithm"
+        },
+        {
+          "key": "found",
+          "label": "Path found?",
+          "type": "DECISION"
+        },
+        {
+          "key": "fmt",
+          "label": "Format route",
+          "type": "PROCESS"
+        },
+        {
+          "key": "none",
+          "label": "Report no route",
+          "type": "PROCESS"
+        },
+        {
+          "key": "send",
+          "label": "Send response",
+          "type": "END"
+        }
+      ],
+      "edges": [
+        {
+          "from": "req",
+          "to": "load",
+          "type": "NEXT"
+        },
+        {
+          "from": "map",
+          "to": "load",
+          "type": "NEXT"
+        },
+        {
+          "from": "load",
+          "to": "run",
+          "type": "NEXT"
+        },
+        {
+          "from": "req",
+          "to": "run",
+          "type": "NEXT"
+        },
+        {
+          "from": "run",
+          "to": "found",
+          "type": "NEXT"
+        },
+        {
+          "from": "found",
+          "to": "fmt",
+          "type": "YES",
+          "label": "YES"
+        },
+        {
+          "from": "found",
+          "to": "none",
+          "type": "NO",
+          "label": "NO"
+        },
+        {
+          "from": "fmt",
+          "to": "send",
+          "type": "NEXT"
+        },
+        {
+          "from": "none",
+          "to": "send",
+          "type": "NEXT"
+        }
+      ]
+    },
+    {
+      "key": "dijkstra",
+      "name": "Dijkstra's algorithm",
+      "description": "Single-source shortest paths with a priority queue.",
+      "primary": false,
+      "nodes": [
+        {
+          "key": "start",
+          "label": "Start",
+          "type": "START"
+        },
+        {
+          "key": "graph",
+          "label": "Graph data",
+          "type": "INPUT_OUTPUT"
+        },
+        {
+          "key": "startv",
+          "label": "Start vertex",
+          "type": "INPUT_OUTPUT"
+        },
+        {
+          "key": "validate",
+          "label": "Validate input",
+          "type": "PROCESS",
+          "description": "Reject negative weights and unknown start vertices."
+        },
+        {
+          "key": "init",
+          "label": "Initialize distances",
+          "type": "PROCESS",
+          "description": "Start vertex gets 0, all others infinity."
+        },
+        {
+          "key": "insert",
+          "label": "Insert start in priority queue",
+          "type": "PROCESS"
+        },
+        {
+          "key": "qempty",
+          "label": "Queue empty?",
+          "type": "DECISION"
+        },
+        {
+          "key": "ret",
+          "label": "Return distances",
+          "type": "INPUT_OUTPUT"
+        },
+        {
+          "key": "extract",
+          "label": "Extract min",
+          "type": "PROCESS",
+          "description": "Pop the closest unfinished vertex."
+        },
+        {
+          "key": "visit",
+          "label": "Visit neighbor",
+          "type": "PROCESS"
+        },
+        {
+          "key": "shorter",
+          "label": "New path shorter?",
+          "type": "DECISION"
+        },
+        {
+          "key": "update",
+          "label": "Update distance",
+          "type": "SUBPROCESS",
+          "description": "Compares and stores the candidate distance. Open for details.",
+          "child": "update"
+        },
+        {
+          "key": "uqueue",
+          "label": "Update queue",
+          "type": "PROCESS"
+        },
+        {
+          "key": "more",
+          "label": "More neighbors?",
+          "type": "DECISION"
+        },
+        {
+          "key": "end",
+          "label": "End",
+          "type": "END"
+        }
+      ],
+      "edges": [
+        {
+          "from": "start",
+          "to": "graph",
+          "type": "NEXT"
+        },
+        {
+          "from": "start",
+          "to": "startv",
+          "type": "NEXT"
+        },
+        {
+          "from": "graph",
+          "to": "validate",
+          "type": "NEXT"
+        },
+        {
+          "from": "startv",
+          "to": "validate",
+          "type": "NEXT"
+        },
+        {
+          "from": "validate",
+          "to": "init",
+          "type": "NEXT"
+        },
+        {
+          "from": "startv",
+          "to": "init",
+          "type": "NEXT"
+        },
+        {
+          "from": "init",
+          "to": "insert",
+          "type": "NEXT"
+        },
+        {
+          "from": "insert",
+          "to": "qempty",
+          "type": "NEXT"
+        },
+        {
+          "from": "qempty",
+          "to": "ret",
+          "type": "YES",
+          "label": "YES"
+        },
+        {
+          "from": "qempty",
+          "to": "extract",
+          "type": "NO",
+          "label": "NO"
+        },
+        {
+          "from": "extract",
+          "to": "visit",
+          "type": "NEXT"
+        },
+        {
+          "from": "visit",
+          "to": "shorter",
+          "type": "NEXT"
+        },
+        {
+          "from": "shorter",
+          "to": "update",
+          "type": "YES",
+          "label": "YES"
+        },
+        {
+          "from": "shorter",
+          "to": "more",
+          "type": "NO",
+          "label": "NO"
+        },
+        {
+          "from": "update",
+          "to": "uqueue",
+          "type": "NEXT"
+        },
+        {
+          "from": "uqueue",
+          "to": "more",
+          "type": "NEXT"
+        },
+        {
+          "from": "more",
+          "to": "visit",
+          "type": "YES",
+          "label": "YES"
+        },
+        {
+          "from": "more",
+          "to": "qempty",
+          "type": "NO",
+          "label": "NO"
+        },
+        {
+          "from": "ret",
+          "to": "end",
+          "type": "NEXT"
+        }
+      ]
+    },
+    {
+      "key": "update",
+      "name": "Update distance",
+      "description": "Relax one edge.",
+      "primary": false,
+      "nodes": [
+        {
+          "key": "cur",
+          "label": "Current distance",
+          "type": "INPUT_OUTPUT"
+        },
+        {
+          "key": "cand",
+          "label": "Candidate distance",
+          "type": "INPUT_OUTPUT"
+        },
+        {
+          "key": "compare",
+          "label": "Compare candidate",
+          "type": "PROCESS"
+        },
+        {
+          "key": "smaller",
+          "label": "Candidate smaller?",
+          "type": "DECISION"
+        },
+        {
+          "key": "store",
+          "label": "Store candidate",
+          "type": "PROCESS"
+        },
+        {
+          "key": "ret",
+          "label": "Return result",
+          "type": "END"
+        }
+      ],
+      "edges": [
+        {
+          "from": "cur",
+          "to": "compare",
+          "type": "NEXT"
+        },
+        {
+          "from": "cand",
+          "to": "compare",
+          "type": "NEXT"
+        },
+        {
+          "from": "compare",
+          "to": "smaller",
+          "type": "NEXT"
+        },
+        {
+          "from": "smaller",
+          "to": "store",
+          "type": "YES",
+          "label": "YES"
+        },
+        {
+          "from": "smaller",
+          "to": "ret",
+          "type": "NO",
+          "label": "NO"
+        },
+        {
+          "from": "store",
+          "to": "ret",
+          "type": "NEXT"
+        }
+      ]
+    }
+  ]
+}

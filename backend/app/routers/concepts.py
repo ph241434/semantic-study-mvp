@@ -21,6 +21,8 @@ def post_concept(concept_in: schemas.ConceptCreate, db: Session = Depends(get_db
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="A concept with that name already exists") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/{concept_id}", response_model=schemas.ConceptRead)

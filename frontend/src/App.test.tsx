@@ -8,6 +8,10 @@ vi.mock('./components/GraphCanvas', () => ({
   GraphCanvas: () => <div data-testid="mock-graph-canvas" />,
 }));
 
+vi.mock('./components/PersonalGraphPane', () => ({
+  PersonalGraphPane: () => <div data-testid="mock-personal-graph-pane" />,
+}));
+
 vi.mock('./api/client', () => ({
   api: {
     knowledge: vi.fn(),

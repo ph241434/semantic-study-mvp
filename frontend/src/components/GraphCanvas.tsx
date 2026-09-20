@@ -30,6 +30,7 @@ type Props = {
   hidden: StudyHidden | null;
   linkedConceptIds: Set<number>;
   onSelectConcept: (conceptId: number) => void;
+  onAddToPersonalView?: (conceptId: number) => void;
 };
 
 type GraphNodeData = Record<string, unknown> & {
@@ -38,6 +39,7 @@ type GraphNodeData = Record<string, unknown> & {
   isLinked: boolean;
   isHidden: boolean;
   isAnswer: boolean;
+  onAdd?: () => void;
 };
 
 type GraphEdgeData = Record<string, unknown> & {
@@ -68,6 +70,19 @@ function GraphConceptNode({ data }: NodeProps<SemanticNode>) {
       <Handle type="source" id="c" position={Position.Top} isConnectable={false} className="proto-node-handle" />
       <Handle type="target" id="c" position={Position.Top} isConnectable={false} className="proto-node-handle" />
       <span className="proto-node-label">{data.isHidden ? '???' : data.label}</span>
+      {data.onAdd && (
+        <button
+          type="button"
+          className="proto-node-add"
+          aria-label={`Add ${data.label} to My Model`}
+          onClick={(event) => {
+            event.stopPropagation();
+            data.onAdd?.();
+          }}
+        >
+          +
+        </button>
+      )}
     </div>
   );
 }
@@ -98,7 +113,7 @@ function SemanticRelationshipEdge({ id, markerEnd, style, data }: EdgeProps<Sema
 const nodeTypes = { semanticNode: memo(GraphConceptNode) };
 const edgeTypes = { semanticEdge: memo(SemanticRelationshipEdge) };
 
-export function GraphCanvas({ graph, rootId, hidden, linkedConceptIds, onSelectConcept }: Props) {
+export function GraphCanvas({ graph, rootId, hidden, linkedConceptIds, onSelectConcept, onAddToPersonalView }: Props) {
   const layout = useMemo(() => computeForceLayout(graph, rootId), [graph, rootId]);
   const signature = useMemo(() => graphSignature(graph), [graph]);
 
@@ -119,12 +134,13 @@ export function GraphCanvas({ graph, rootId, hidden, linkedConceptIds, onSelectC
             isLinked: linkedConceptIds.has(node.conceptId),
             isHidden: isHiddenNode,
             isAnswer: isAnswerNode,
+            onAdd: onAddToPersonalView ? () => onAddToPersonalView(node.conceptId) : undefined,
           },
           style: { width: GRAPH_NODE_WIDTH, height: GRAPH_NODE_HEIGHT },
           zIndex: node.isRoot ? 20 : 10,
         };
       }),
-    [layout.nodes, hidden, linkedConceptIds],
+    [layout.nodes, hidden, linkedConceptIds, onAddToPersonalView],
   );
 
   const edges: SemanticEdge[] = useMemo(

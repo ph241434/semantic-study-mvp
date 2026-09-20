@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from . import models, schemas
@@ -36,6 +37,9 @@ def update_concept(db: Session, concept: models.Concept, concept_in: schemas.Con
 
 
 def delete_concept(db: Session, concept: models.Concept) -> None:
+    db.query(models.GraphViewNode).filter(models.GraphViewNode.concept_id == concept.id).update(
+        {"concept_id": None, "node_type": "note"}
+    )
     db.delete(concept)
     db.commit()
 
@@ -137,4 +141,155 @@ def create_question(db: Session, question_in: schemas.QuestionCreate) -> models.
     db.commit()
     db.refresh(question)
     return question
+
+
+def list_graph_views(db: Session, root_concept_id: int) -> list[models.GraphView]:
+    return (
+        db.query(models.GraphView)
+        .filter(models.GraphView.root_concept_id == root_concept_id)
+        .order_by(models.GraphView.sort_order.asc(), models.GraphView.id.asc())
+        .all()
+    )
+
+
+def get_graph_view(db: Session, view_id: int) -> models.GraphView | None:
+    return db.query(models.GraphView).filter(models.GraphView.id == view_id).first()
+
+
+def create_graph_view(db: Session, view_in: schemas.GraphViewCreate) -> models.GraphView:
+    if get_concept(db, view_in.root_concept_id) is None:
+        raise ValueError("root_concept_id does not exist")
+
+    view = models.GraphView(**view_in.model_dump())
+    db.add(view)
+    db.commit()
+    db.refresh(view)
+    return view
+
+
+def update_graph_view(db: Session, view: models.GraphView, view_in: schemas.GraphViewUpdate) -> models.GraphView:
+    for key, value in view_in.model_dump(exclude_unset=True).items():
+        setattr(view, key, value)
+    view.updated_at = utc_now()
+    db.commit()
+    db.refresh(view)
+    return view
+
+
+def delete_graph_view(db: Session, view: models.GraphView) -> None:
+    db.delete(view)
+    db.commit()
+
+
+def get_graph_view_node(db: Session, node_id: int) -> models.GraphViewNode | None:
+    return db.query(models.GraphViewNode).filter(models.GraphViewNode.id == node_id).first()
+
+
+def _existing_view_node_for_concept(
+    db: Session, graph_view_id: int, concept_id: int
+) -> models.GraphViewNode | None:
+    return (
+        db.query(models.GraphViewNode)
+        .filter(
+            models.GraphViewNode.graph_view_id == graph_view_id,
+            models.GraphViewNode.concept_id == concept_id,
+        )
+        .first()
+    )
+
+
+def add_node_to_view(
+    db: Session, view: models.GraphView, node_in: schemas.GraphViewNodeCreate
+) -> models.GraphViewNode:
+    if node_in.concept_id is not None:
+        if get_concept(db, node_in.concept_id) is None:
+            raise ValueError("concept_id does not exist")
+
+        existing = _existing_view_node_for_concept(db, view.id, node_in.concept_id)
+        if existing is not None:
+            return existing
+
+    node_type = "concept" if node_in.concept_id is not None else "note"
+    node = models.GraphViewNode(
+        graph_view_id=view.id,
+        concept_id=node_in.concept_id,
+        label=node_in.label,
+        node_type=node_type,
+        x=node_in.x,
+        y=node_in.y,
+    )
+    db.add(node)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        if node_in.concept_id is not None:
+            existing = _existing_view_node_for_concept(db, view.id, node_in.concept_id)
+            if existing is not None:
+                return existing
+        raise
+    db.refresh(node)
+    return node
+
+
+def update_graph_view_node(
+    db: Session, node: models.GraphViewNode, node_in: schemas.GraphViewNodeUpdate
+) -> models.GraphViewNode:
+    for key, value in node_in.model_dump(exclude_unset=True).items():
+        setattr(node, key, value)
+    node.updated_at = utc_now()
+    db.commit()
+    db.refresh(node)
+    return node
+
+
+def delete_graph_view_node(db: Session, node: models.GraphViewNode) -> None:
+    db.delete(node)
+    db.commit()
+
+
+def get_graph_view_edge(db: Session, edge_id: int) -> models.GraphViewEdge | None:
+    return db.query(models.GraphViewEdge).filter(models.GraphViewEdge.id == edge_id).first()
+
+
+def create_graph_view_edge(
+    db: Session, view: models.GraphView, edge_in: schemas.GraphViewEdgeCreate
+) -> models.GraphViewEdge:
+    if edge_in.source_view_node_id == edge_in.target_view_node_id:
+        raise ValueError("source and target nodes must be different")
+
+    source = get_graph_view_node(db, edge_in.source_view_node_id)
+    target = get_graph_view_node(db, edge_in.target_view_node_id)
+    if source is None or target is None:
+        raise ValueError("source_view_node_id and target_view_node_id must both exist")
+    if source.graph_view_id != view.id or target.graph_view_id != view.id:
+        raise ValueError("source and target nodes must belong to this view")
+
+    edge = models.GraphViewEdge(
+        graph_view_id=view.id,
+        source_view_node_id=edge_in.source_view_node_id,
+        target_view_node_id=edge_in.target_view_node_id,
+        label=edge_in.label,
+        relationship_type=edge_in.relationship_type,
+    )
+    db.add(edge)
+    db.commit()
+    db.refresh(edge)
+    return edge
+
+
+def update_graph_view_edge(
+    db: Session, edge: models.GraphViewEdge, edge_in: schemas.GraphViewEdgeUpdate
+) -> models.GraphViewEdge:
+    for key, value in edge_in.model_dump(exclude_unset=True).items():
+        setattr(edge, key, value)
+    edge.updated_at = utc_now()
+    db.commit()
+    db.refresh(edge)
+    return edge
+
+
+def delete_graph_view_edge(db: Session, edge: models.GraphViewEdge) -> None:
+    db.delete(edge)
+    db.commit()
 

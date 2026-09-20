@@ -3,6 +3,11 @@ import type {
   ConceptType,
   Dashboard,
   GraphResponse,
+  GraphView,
+  GraphViewDetail,
+  GraphViewEdge,
+  GraphViewNode,
+  GraphViewNodeType,
   KnowledgeEntry,
   Question,
   Rating,
@@ -76,5 +81,27 @@ export const api = {
   dashboard: () => request<Dashboard>('/dashboard'),
   search: (q: string) => request<Concept[]>(`/search?q=${encodeURIComponent(q)}`),
   knowledge: () => request<KnowledgeEntry[]>('/knowledge'),
+  listGraphViews: (rootConceptId: number) =>
+    request<GraphView[]>(`/graph-views?root_concept_id=${rootConceptId}`),
+  createGraphView: (payload: { root_concept_id: number; name: string; view_type?: string; sort_order?: number }) =>
+    request<GraphView>('/graph-views', { method: 'POST', body: JSON.stringify(payload) }),
+  getGraphView: (id: number) => request<GraphViewDetail>(`/graph-views/${id}`),
+  updateGraphView: (id: number, payload: Partial<{ name: string; sort_order: number }>) =>
+    request<GraphView>(`/graph-views/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteGraphView: (id: number) => request<void>(`/graph-views/${id}`, { method: 'DELETE' }),
+  addGraphViewNode: (
+    viewId: number,
+    payload: { concept_id: number | null; label: string; node_type: GraphViewNodeType; x: number; y: number },
+  ) => request<GraphViewNode>(`/graph-views/${viewId}/nodes`, { method: 'POST', body: JSON.stringify(payload) }),
+  updateGraphViewNode: (id: number, payload: Partial<{ label: string; x: number; y: number }>) =>
+    request<GraphViewNode>(`/graph-view-nodes/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteGraphViewNode: (id: number) => request<void>(`/graph-view-nodes/${id}`, { method: 'DELETE' }),
+  createGraphViewEdge: (
+    viewId: number,
+    payload: { source_view_node_id: number; target_view_node_id: number; label?: string | null; relationship_type?: string | null },
+  ) => request<GraphViewEdge>(`/graph-views/${viewId}/edges`, { method: 'POST', body: JSON.stringify(payload) }),
+  updateGraphViewEdge: (id: number, payload: Partial<{ label: string | null; relationship_type: string | null }>) =>
+    request<GraphViewEdge>(`/graph-view-edges/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteGraphViewEdge: (id: number) => request<void>(`/graph-view-edges/${id}`, { method: 'DELETE' }),
 };
 

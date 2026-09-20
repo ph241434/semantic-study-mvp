@@ -1,8 +1,11 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { forwardRef, useImperativeHandle } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FilesystemBreadcrumbSegment, GraphResponse, Relationship, TrailEntry } from '../types';
+
+const addConceptNodeMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../components/GraphCanvas', () => ({
   GraphCanvas: ({
@@ -10,11 +13,13 @@ vi.mock('../components/GraphCanvas', () => ({
     rootId,
     hidden,
     onSelectConcept,
+    onAddToPersonalView,
   }: {
     graph: GraphResponse;
     rootId: number;
     hidden: { edgeId: number; hiddenConceptId: number | null; revealed: boolean } | null;
     onSelectConcept: (conceptId: number) => void;
+    onAddToPersonalView?: (conceptId: number) => void;
   }) => (
     <div
       data-testid="mock-graph-canvas"
@@ -29,8 +34,21 @@ vi.mock('../components/GraphCanvas', () => ({
           {`Select node ${node.id}`}
         </button>
       ))}
+      {onAddToPersonalView &&
+        graph.nodes.map((node) => (
+          <button key={`add-${node.id}`} type="button" onClick={() => onAddToPersonalView(node.id)}>
+            {`Add node ${node.id}`}
+          </button>
+        ))}
     </div>
   ),
+}));
+
+vi.mock('../components/PersonalGraphPane', () => ({
+  PersonalGraphPane: forwardRef(function MockPersonalGraphPane(_props: { rootId: number }, ref) {
+    useImperativeHandle(ref, () => ({ addConceptNode: addConceptNodeMock }));
+    return <div data-testid="mock-personal-graph-pane" />;
+  }),
 }));
 
 vi.mock('../api/client', () => ({
@@ -131,6 +149,7 @@ function renderGraphPage(trail: TrailEntry[], overrides: Partial<Parameters<type
 describe('GraphPage single-depth semantic graph', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    addConceptNodeMock.mockClear();
     vi.mocked(api.graph).mockImplementation(async (conceptId: number) => graphs[conceptId]);
   });
 
@@ -244,5 +263,21 @@ describe('GraphPage single-depth semantic graph', () => {
 
     expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-root-id', '1');
     expect(screen.getByTestId('mock-graph-canvas')).toHaveAttribute('data-revealed', 'true');
+  });
+
+  it('renders the personal graph pane alongside the source graph', async () => {
+    renderGraphPage([{ id: 1, name: 'Asymmetric Encryption' }]);
+    await screen.findByTestId('mock-graph-canvas');
+
+    expect(screen.getByTestId('mock-personal-graph-pane')).toBeInTheDocument();
+  });
+
+  it('adds a source concept to the personal view via the + affordance', async () => {
+    renderGraphPage([{ id: 1, name: 'Asymmetric Encryption' }]);
+    await screen.findByTestId('mock-graph-canvas');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add node 2' }));
+
+    expect(addConceptNodeMock).toHaveBeenCalledWith({ id: 2, name: 'Public Key' });
   });
 });

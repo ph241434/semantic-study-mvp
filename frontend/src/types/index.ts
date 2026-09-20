@@ -129,3 +129,39 @@ export type TrailEntry = { id: number; name: string };
 
 export type FilesystemBreadcrumbSegment = { id: number | null; name: string };
 
+export type GraphViewNodeType = 'concept' | 'note';
+
+export type GraphView = {
+  id: number;
+  root_concept_id: number;
+  name: string;
+  view_type: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GraphViewNode = {
+  id: number;
+  graph_view_id: number;
+  concept_id: number | null;
+  label: string;
+  node_type: GraphViewNodeType;
+  x: number;
+  y: number;
+};
+
+export type GraphViewEdge = {
+  id: number;
+  graph_view_id: number;
+  source_view_node_id: number;
+  target_view_node_id: number;
+  label: string | null;
+  relationship_type: string | null;
+};
+
+export type GraphViewDetail = GraphView & {
+  nodes: GraphViewNode[];
+  edges: GraphViewEdge[];
+};
+

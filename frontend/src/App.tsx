@@ -1,20 +1,26 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { api } from './api/client';
+import { createViewStateStore } from './flowchart/viewStateStore';
+import { FlowchartPage } from './pages/FlowchartPage';
 import { GraphPage } from './pages/GraphPage';
 import { KnowledgePage } from './pages/KnowledgePage';
 import type { FilesystemBreadcrumbSegment, KnowledgeEntry, TrailEntry } from './types';
 
 type Screen =
+  | { mode: 'flowchart' }
   | { mode: 'filesystem'; folderId: number | null }
   | { mode: 'graph'; originFolderId: number | null; trail: TrailEntry[] };
 
-const INITIAL_SCREEN: Screen = { mode: 'filesystem', folderId: null };
+// The flowchart workspace is the primary screen; the knowledge browser and concept explorer stay one click away.
+const INITIAL_SCREEN: Screen = { mode: 'flowchart' };
 
 function App() {
   const [entries, setEntries] = useState<KnowledgeEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [screen, setScreen] = useState<Screen>(INITIAL_SCREEN);
+  // Kept here so each flowchart's positions / pan / zoom survive leaving and returning to the workspace.
+  const viewStates = useRef(createViewStateStore()).current;
 
   useEffect(() => {
     let active = true;
@@ -82,11 +88,25 @@ function App() {
     return <p className="proto-status">Loading…</p>;
   }
 
+  if (screen.mode === 'flowchart') {
+    return (
+      <FlowchartPage
+        entries={entries}
+        viewStates={viewStates}
+        onOpenKnowledge={() => navigate({ mode: 'filesystem', folderId: null })}
+        onOpenConceptExplorer={(conceptId, name) =>
+          navigate({ mode: 'graph', originFolderId: null, trail: [{ id: conceptId, name }] })
+        }
+      />
+    );
+  }
+
   if (screen.mode === 'filesystem') {
     return (
       <KnowledgePage
         folderId={screen.folderId}
         entries={entries}
+        onOpenFlowcharts={() => navigate({ mode: 'flowchart' })}
         onNavigateFolder={(folderId) => navigate({ mode: 'filesystem', folderId })}
         onOpenConcept={(conceptId, name, fromFolderId) =>
           navigate({ mode: 'graph', originFolderId: fromFolderId, trail: [{ id: conceptId, name }] })
@@ -102,6 +122,7 @@ function App() {
       linkedConceptIds={linkedConceptIds}
       onTrailChange={(trail) => navigate({ mode: 'graph', originFolderId: screen.originFolderId, trail })}
       onExitToFilesystem={(folderId) => navigate({ mode: 'filesystem', folderId })}
+      onOpenFlowcharts={() => navigate({ mode: 'flowchart' })}
     />
   );
 }

@@ -165,3 +165,62 @@ export type GraphViewDetail = GraphView & {
   edges: GraphViewEdge[];
 };
 
+
+// --- Flowcharts (process graphs). Flow edges are local to one flowchart and are NOT semantic relationships. ---
+
+export type FlowNodeType =
+  | 'start'
+  | 'end'
+  | 'process'
+  | 'decision'
+  | 'input_output'
+  | 'subprocess'
+  | 'external_system'
+  | 'data';
+
+export type FlowEdgeType = 'normal' | 'yes' | 'no' | 'success' | 'failure' | 'retry';
+
+export type Flowchart = {
+  id: number;
+  name: string;
+  description: string;
+  folder_id: number | null;
+  node_count: number;
+  edge_count: number;
+  /** How many nodes open this flowchart as their detailed flowchart (0 = top-level). */
+  used_by_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FlowNode = {
+  id: number;
+  flowchart_id: number;
+  concept_id: number | null;
+  concept_name: string | null;
+  concept_description: string | null;
+  label: string;
+  description: string;
+  node_type: FlowNodeType;
+  child_flowchart_id: number | null;
+  child_flowchart_name: string | null;
+  /** Manual position override (top-left in flow coordinates). null = automatic layout. */
+  x: number | null;
+  y: number | null;
+};
+
+export type FlowEdge = {
+  id: number;
+  flowchart_id: number;
+  source_node_id: number;
+  target_node_id: number;
+  edge_type: FlowEdgeType;
+  label: string | null;
+  description: string | null;
+};
+
+export type FlowchartDetail = {
+  flowchart: Flowchart;
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+};

@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    CheckConstraint,
     Column,
     DateTime,
     Float,
@@ -203,3 +204,93 @@ class GraphViewEdge(Base):
     target_node = orm_relationship(
         "GraphViewNode", back_populates="incoming_edges", foreign_keys=[target_view_node_id]
     )
+
+
+class Flowchart(Base):
+    """One directed process graph. Any node may open another Flowchart via FlowNode.child_flowchart_id."""
+
+    __tablename__ = "flowcharts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(140), nullable=False, index=True)
+    description = Column(Text, nullable=False, default="")
+    # Optional home in the knowledge filesystem (must be a "folder" entry). Nullable so a flowchart can stand alone.
+    folder_id = Column(Integer, ForeignKey("knowledge_entries.id"), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+    folder = orm_relationship("KnowledgeEntry")
+    nodes = orm_relationship(
+        "FlowNode",
+        back_populates="flowchart",
+        cascade="all, delete-orphan",
+        order_by="FlowNode.id",
+        foreign_keys="FlowNode.flowchart_id",
+    )
+    edges = orm_relationship(
+        "FlowEdge",
+        back_populates="flowchart",
+        cascade="all, delete-orphan",
+        order_by="FlowEdge.id",
+    )
+
+
+class FlowNode(Base):
+    """One occurrence of a step inside one Flowchart.
+
+    concept_id points at a global, reusable Concept that the node never owns or deletes. The same Concept may
+    appear in many flowcharts (or several times in one), each occurrence with its own label, description and edges.
+    """
+
+    __tablename__ = "flow_nodes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    flowchart_id = Column(Integer, ForeignKey("flowcharts.id"), nullable=False, index=True)
+    concept_id = Column(Integer, ForeignKey("concepts.id"), nullable=True, index=True)
+    label = Column(String(140), nullable=False)
+    description = Column(Text, nullable=False, default="")
+    node_type = Column(String(20), nullable=False, default="process")
+    # Deliberately not unique: several nodes may open the same reusable detail flowchart.
+    child_flowchart_id = Column(Integer, ForeignKey("flowcharts.id"), nullable=True, index=True)
+    # Manual position override only. NULL means "use the automatic layout".
+    x = Column(Float, nullable=True)
+    y = Column(Float, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+    flowchart = orm_relationship("Flowchart", back_populates="nodes", foreign_keys=[flowchart_id])
+    child_flowchart = orm_relationship("Flowchart", foreign_keys=[child_flowchart_id])
+    concept = orm_relationship("Concept")
+    outgoing_edges = orm_relationship(
+        "FlowEdge",
+        back_populates="source_node",
+        cascade="all, delete-orphan",
+        foreign_keys="FlowEdge.source_node_id",
+    )
+    incoming_edges = orm_relationship(
+        "FlowEdge",
+        back_populates="target_node",
+        cascade="all, delete-orphan",
+        foreign_keys="FlowEdge.target_node_id",
+    )
+
+
+class FlowEdge(Base):
+    """Directed process/control-flow edge, local to ONE Flowchart. Not a semantic Relationship."""
+
+    __tablename__ = "flow_edges"
+    __table_args__ = (CheckConstraint("source_node_id != target_node_id", name="ck_flow_edge_no_self_loop"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    flowchart_id = Column(Integer, ForeignKey("flowcharts.id"), nullable=False, index=True)
+    source_node_id = Column(Integer, ForeignKey("flow_nodes.id"), nullable=False, index=True)
+    target_node_id = Column(Integer, ForeignKey("flow_nodes.id"), nullable=False, index=True)
+    edge_type = Column(String(20), nullable=False, default="normal")
+    label = Column(String(140), nullable=True)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+    flowchart = orm_relationship("Flowchart", back_populates="edges")
+    source_node = orm_relationship("FlowNode", back_populates="outgoing_edges", foreign_keys=[source_node_id])
+    target_node = orm_relationship("FlowNode", back_populates="incoming_edges", foreign_keys=[target_node_id])

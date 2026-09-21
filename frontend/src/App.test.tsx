@@ -12,10 +12,20 @@ vi.mock('./components/PersonalGraphPane', () => ({
   PersonalGraphPane: () => <div data-testid="mock-personal-graph-pane" />,
 }));
 
+vi.mock('./flowchart/FlowchartCanvas', () => ({
+  FlowchartCanvas: ({ detail }: { detail: { flowchart: { id: number; name: string } } }) => (
+    <div data-testid="mock-flowchart-canvas" data-flowchart-id={detail.flowchart.id} />
+  ),
+}));
+
 vi.mock('./api/client', () => ({
   api: {
     knowledge: vi.fn(),
     graph: vi.fn(),
+    flowcharts: vi.fn(),
+    flowchart: vi.fn(),
+    concepts: vi.fn(),
+    relationships: vi.fn(),
   },
 }));
 
@@ -57,29 +67,64 @@ const graphResponse: GraphResponse = {
   relationships: [],
 };
 
+const flowchartSummary = {
+  id: 5,
+  name: 'Gmail Encryption System',
+  description: '',
+  folder_id: 3,
+  node_count: 1,
+  edge_count: 0,
+  used_by_count: 0,
+  created_at: '',
+  updated_at: '',
+};
+
+async function openKnowledgeBrowser() {
+  await screen.findByTestId('mock-flowchart-canvas');
+  fireEvent.click(screen.getByRole('button', { name: 'Knowledge browser' }));
+  await screen.findByTestId('knowledge-list');
+}
+
 describe('App top-level navigation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.replaceState(null, '', '/');
     vi.mocked(api.knowledge).mockResolvedValue(entries);
     vi.mocked(api.graph).mockResolvedValue(graphResponse);
+    vi.mocked(api.flowcharts).mockResolvedValue([flowchartSummary]);
+    vi.mocked(api.flowchart).mockResolvedValue({ flowchart: flowchartSummary, nodes: [], edges: [] });
+    vi.mocked(api.concepts).mockResolvedValue([]);
+    vi.mocked(api.relationships).mockResolvedValue([]);
   });
 
   afterEach(() => {
     cleanup();
   });
 
-  it('defaults to the filesystem browser at the Knowledge root, not a graph', async () => {
+  it('opens on the flowchart workspace, not the knowledge browser or a concept graph', async () => {
     render(<App />);
 
-    const list = await screen.findByTestId('knowledge-list');
-    expect(list).toHaveTextContent('Algorithms');
-    expect(list).toHaveTextContent('Cybersecurity');
+    expect(await screen.findByTestId('mock-flowchart-canvas')).toHaveAttribute('data-flowchart-id', '5');
+    expect(screen.getByTestId('flow-breadcrumb')).toHaveTextContent('Gmail Encryption System');
+    expect(screen.queryByTestId('knowledge-list')).not.toBeInTheDocument();
     expect(screen.queryByTestId('mock-graph-canvas')).not.toBeInTheDocument();
   });
 
-  it('opening a concept file switches to the graph view with the combined breadcrumb', async () => {
+  it('keeps the knowledge browser one click away from the workspace, and the way back', async () => {
     render(<App />);
-    await screen.findByTestId('knowledge-list');
+    await openKnowledgeBrowser();
+
+    const list = screen.getByTestId('knowledge-list');
+    expect(list).toHaveTextContent('Algorithms');
+    expect(list).toHaveTextContent('Cybersecurity');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Flowcharts' }));
+    expect(await screen.findByTestId('mock-flowchart-canvas')).toBeInTheDocument();
+  });
+
+  it('opening a concept file from the knowledge browser switches to the concept graph with the combined breadcrumb', async () => {
+    render(<App />);
+    await openKnowledgeBrowser();
 
     fireEvent.click(screen.getByRole('button', { name: 'Cybersecurity' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Cryptography' }));
@@ -90,11 +135,15 @@ describe('App top-level navigation', () => {
     expect(breadcrumb).toHaveTextContent('Cybersecurity');
     expect(breadcrumb).toHaveTextContent('Cryptography');
     expect(breadcrumb).toHaveTextContent('Asymmetric Encryption');
+
+    // The concept explorer links back to the workspace too.
+    fireEvent.click(screen.getByRole('button', { name: 'Flowcharts' }));
+    expect(await screen.findByTestId('mock-flowchart-canvas')).toBeInTheDocument();
   });
 
   it('returns to the correct filesystem folder on browser back (popstate)', async () => {
     render(<App />);
-    await screen.findByTestId('knowledge-list');
+    await openKnowledgeBrowser();
 
     fireEvent.click(screen.getByRole('button', { name: 'Cybersecurity' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Cryptography' }));
@@ -105,5 +154,13 @@ describe('App top-level navigation', () => {
 
     await waitFor(() => expect(screen.getByTestId('knowledge-list')).toHaveTextContent('Asymmetric Encryption'));
     expect(screen.getByTestId('knowledge-breadcrumb')).toHaveTextContent('Cryptography');
+  });
+
+  it('returns to the flowchart workspace on browser back (popstate)', async () => {
+    render(<App />);
+    await openKnowledgeBrowser();
+
+    window.dispatchEvent(new PopStateEvent('popstate', { state: { mode: 'flowchart' } }));
+    expect(await screen.findByTestId('mock-flowchart-canvas')).toBeInTheDocument();
   });
 });

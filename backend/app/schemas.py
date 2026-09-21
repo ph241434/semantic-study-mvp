@@ -302,6 +302,142 @@ class GraphViewDetail(GraphViewRead):
     edges: list[GraphViewEdgeRead]
 
 
+FlowNodeType = Literal[
+    "start",
+    "end",
+    "process",
+    "decision",
+    "input_output",
+    "subprocess",
+    "external_system",
+    "data",
+]
+
+# Process-flow vocabulary, deliberately separate from RELATIONSHIP_TYPES (USES, REQUIRES, ...). The free-text
+# label (e.g. "PASS", "retry after 3s") is unrestricted; edge_type only says what kind of flow it is.
+FlowEdgeType = Literal["normal", "yes", "no", "success", "failure", "retry"]
+
+
+class FlowchartBase(BaseModel):
+    name: str = Field(min_length=1, max_length=140)
+    description: str = ""
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        return value.strip()
+
+
+class FlowchartCreate(FlowchartBase):
+    folder_id: int | None = None
+
+
+class FlowchartUpdate(BaseModel):
+    """PATCH body. Fields that are present are applied, so folder_id null detaches from a folder."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=140)
+    description: str | None = None
+    folder_id: int | None = None
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else value
+
+
+class FlowchartRead(FlowchartBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    folder_id: int | None
+    node_count: int = 0
+    edge_count: int = 0
+    # How many nodes open this flowchart as their detailed flowchart. 0 means it is a top-level flowchart.
+    used_by_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class FlowNodeCreate(BaseModel):
+    label: str = Field(min_length=1, max_length=140)
+    description: str = ""
+    node_type: FlowNodeType = "process"
+    concept_id: int | None = None
+    child_flowchart_id: int | None = None
+    x: float | None = None
+    y: float | None = None
+
+    @field_validator("label")
+    @classmethod
+    def clean_label(cls, value: str) -> str:
+        return value.strip()
+
+
+class FlowNodeUpdate(BaseModel):
+    """PATCH body. Fields that are present are applied, so child_flowchart_id null detaches the child."""
+
+    label: str | None = Field(default=None, min_length=1, max_length=140)
+    description: str | None = None
+    node_type: FlowNodeType | None = None
+    concept_id: int | None = None
+    child_flowchart_id: int | None = None
+    x: float | None = None
+    y: float | None = None
+
+    @field_validator("label")
+    @classmethod
+    def clean_label(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else value
+
+
+class FlowNodeRead(BaseModel):
+    id: int
+    flowchart_id: int
+    concept_id: int | None
+    # Copied from the linked Concept so a client can render a whole flowchart from one response.
+    concept_name: str | None = None
+    concept_description: str | None = None
+    label: str
+    description: str
+    node_type: FlowNodeType
+    child_flowchart_id: int | None
+    child_flowchart_name: str | None = None
+    x: float | None
+    y: float | None
+
+
+class FlowEdgeCreate(BaseModel):
+    source_node_id: int
+    target_node_id: int
+    edge_type: FlowEdgeType = "normal"
+    label: str | None = Field(default=None, max_length=140)
+    description: str | None = None
+
+
+class FlowEdgeUpdate(BaseModel):
+    edge_type: FlowEdgeType | None = None
+    label: str | None = Field(default=None, max_length=140)
+    description: str | None = None
+
+
+class FlowEdgeRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    flowchart_id: int
+    source_node_id: int
+    target_node_id: int
+    edge_type: FlowEdgeType
+    label: str | None
+    description: str | None
+
+
+class FlowchartDetail(BaseModel):
+    flowchart: FlowchartRead
+    nodes: list[FlowNodeRead]
+    edges: list[FlowEdgeRead]
+
+
 class ReconstructionResponse(BaseModel):
     concept: ConceptRead
     question: QuestionRead

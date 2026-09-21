@@ -8,9 +8,10 @@ type Props = {
   entries: KnowledgeEntry[];
   onNavigateFolder: (folderId: number | null) => void;
   onOpenConcept: (conceptId: number, name: string, fromFolderId: number | null) => void;
+  onOpenFlowcharts?: () => void;
 };
 
-export function KnowledgePage({ folderId, entries, onNavigateFolder, onOpenConcept }: Props) {
+export function KnowledgePage({ folderId, entries, onNavigateFolder, onOpenConcept, onOpenFlowcharts }: Props) {
   const entriesById = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries]);
 
   const children = useMemo(
@@ -42,6 +43,11 @@ export function KnowledgePage({ folderId, entries, onNavigateFolder, onOpenConce
             </span>
           ))}
         </nav>
+        {onOpenFlowcharts && (
+          <button type="button" className="proto-btn" onClick={onOpenFlowcharts}>
+            Flowcharts
+          </button>
+        )}
       </header>
 
       <main className="proto-main">

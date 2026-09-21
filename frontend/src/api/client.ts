@@ -2,6 +2,12 @@ import type {
   Concept,
   ConceptType,
   Dashboard,
+  FlowEdge,
+  FlowEdgeType,
+  FlowNode,
+  FlowNodeType,
+  Flowchart,
+  FlowchartDetail,
   GraphResponse,
   GraphView,
   GraphViewDetail,
@@ -81,6 +87,52 @@ export const api = {
   dashboard: () => request<Dashboard>('/dashboard'),
   search: (q: string) => request<Concept[]>(`/search?q=${encodeURIComponent(q)}`),
   knowledge: () => request<KnowledgeEntry[]>('/knowledge'),
+  flowcharts: () => request<Flowchart[]>('/flowcharts'),
+  flowchart: (id: number) => request<FlowchartDetail>(`/flowcharts/${id}`),
+  createFlowchart: (payload: { name: string; description?: string; folder_id?: number | null }) =>
+    request<Flowchart>('/flowcharts', { method: 'POST', body: JSON.stringify(payload) }),
+  updateFlowchart: (id: number, payload: Partial<{ name: string; description: string; folder_id: number | null }>) =>
+    request<Flowchart>(`/flowcharts/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteFlowchart: (id: number) => request<void>(`/flowcharts/${id}`, { method: 'DELETE' }),
+  reorganizeFlowchart: (id: number) => request<void>(`/flowcharts/${id}/reorganize`, { method: 'POST' }),
+  createFlowNode: (
+    flowchartId: number,
+    payload: {
+      label: string;
+      description?: string;
+      node_type?: FlowNodeType;
+      concept_id?: number | null;
+      child_flowchart_id?: number | null;
+      x?: number | null;
+      y?: number | null;
+    },
+  ) => request<FlowNode>(`/flowcharts/${flowchartId}/nodes`, { method: 'POST', body: JSON.stringify(payload) }),
+  updateFlowNode: (
+    id: number,
+    payload: Partial<{
+      label: string;
+      description: string;
+      node_type: FlowNodeType;
+      concept_id: number | null;
+      child_flowchart_id: number | null;
+      x: number | null;
+      y: number | null;
+    }>,
+  ) => request<FlowNode>(`/flow-nodes/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteFlowNode: (id: number) => request<void>(`/flow-nodes/${id}`, { method: 'DELETE' }),
+  createFlowEdge: (
+    flowchartId: number,
+    payload: {
+      source_node_id: number;
+      target_node_id: number;
+      edge_type?: FlowEdgeType;
+      label?: string | null;
+      description?: string | null;
+    },
+  ) => request<FlowEdge>(`/flowcharts/${flowchartId}/edges`, { method: 'POST', body: JSON.stringify(payload) }),
+  updateFlowEdge: (id: number, payload: Partial<{ edge_type: FlowEdgeType; label: string | null; description: string | null }>) =>
+    request<FlowEdge>(`/flow-edges/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteFlowEdge: (id: number) => request<void>(`/flow-edges/${id}`, { method: 'DELETE' }),
   listGraphViews: (rootConceptId: number) =>
     request<GraphView[]>(`/graph-views?root_concept_id=${rootConceptId}`),
   createGraphView: (payload: { root_concept_id: number; name: string; view_type?: string; sort_order?: number }) =>

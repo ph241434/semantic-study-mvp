@@ -40,6 +40,8 @@ def delete_concept(db: Session, concept: models.Concept) -> None:
     db.query(models.GraphViewNode).filter(models.GraphViewNode.concept_id == concept.id).update(
         {"concept_id": None, "node_type": "note"}
     )
+    # Flowchart nodes keep their own label, description and edges; they only lose the link to the deleted concept.
+    db.query(models.FlowNode).filter(models.FlowNode.concept_id == concept.id).update({"concept_id": None})
     db.delete(concept)
     db.commit()
 

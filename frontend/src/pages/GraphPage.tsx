@@ -25,6 +25,7 @@ type Props = {
   linkedConceptIds: Set<number>;
   onTrailChange: (trail: TrailEntry[]) => void;
   onExitToFilesystem: (folderId: number | null) => void;
+  onOpenFlowcharts?: () => void;
 };
 
 function prettifyType(value: string) {
@@ -76,6 +77,7 @@ export function GraphPage({
   linkedConceptIds,
   onTrailChange,
   onExitToFilesystem,
+  onOpenFlowcharts,
 }: Props) {
   const rootId = trail[trail.length - 1].id;
 
@@ -207,6 +209,12 @@ export function GraphPage({
             </span>
           ))}
         </nav>
+
+        {onOpenFlowcharts && (
+          <button type="button" className="proto-btn" onClick={onOpenFlowcharts}>
+            Flowcharts
+          </button>
+        )}
 
         <div className="proto-mode-toggle" role="group" aria-label="Mode">
           <button

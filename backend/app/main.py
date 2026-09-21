@@ -5,7 +5,18 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import SessionLocal, init_db
-from .routers import concepts, dashboard, graph, graph_views, knowledge, questions, relationships, search, study
+from .routers import (
+    concepts,
+    dashboard,
+    flowcharts,
+    graph,
+    graph_views,
+    knowledge,
+    questions,
+    relationships,
+    search,
+    study,
+)
 from .seed import seed_database
 
 
@@ -45,6 +56,7 @@ app.include_router(concepts.router)
 app.include_router(relationships.router)
 app.include_router(graph.router)
 app.include_router(graph_views.router)
+app.include_router(flowcharts.router)
 app.include_router(knowledge.router)
 app.include_router(questions.router)
 app.include_router(study.router)

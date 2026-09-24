@@ -2,9 +2,8 @@ import { ArrowLeft, Plus, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { api } from '../api/client';
-import { AddNodeForm, FloatingPanel, NewFlowchartForm } from '../flowchart/FlowForms';
 import { ConceptCard, EdgeInspector, NodeInspector, type EdgePatch, type NodePatch } from '../flowchart/FlowInspector';
-import { FlowNavigator } from '../flowchart/FlowNavigator';
+import { FlowNavigator, type CreationRequest } from '../flowchart/FlowNavigator';
 import { FlowchartCanvas } from '../flowchart/FlowchartCanvas';
 import { createViewStateStore, type FlowchartViewStateStore } from '../flowchart/viewStateStore';
 import type { Concept, FlowEdgeType, FlowNode, Flowchart, FlowchartDetail, KnowledgeEntry, Relationship } from '../types';
@@ -15,10 +14,11 @@ type Props = {
   viewStates?: FlowchartViewStateStore;
   onOpenKnowledge: () => void;
   onOpenConceptExplorer: (conceptId: number, name: string) => void;
+  /** Optimistically merges a folder created from the sidebar into the app-wide entries list. */
+  onEntryCreated?: (entry: KnowledgeEntry) => void;
 };
 
 type Selection = { kind: 'node'; id: number } | { kind: 'edge'; id: number } | null;
-type QuickPanel = 'flowchart' | 'node' | null;
 
 /** The flowchart to show first: the requested one, else the oldest top-level (not a "detail") flowchart. */
 export function pickInitialFlowchart(flowcharts: Flowchart[], requestedId: number | null): Flowchart | null {
@@ -36,7 +36,7 @@ export function pickInitialFlowchart(flowcharts: Flowchart[], requestedId: numbe
  * The default screen is deliberately quiet: navigator, breadcrumb, canvas and two buttons. Everything else appears
  * only when something is selected.
  */
-export function FlowchartPage({ entries, viewStates: externalViewStates, onOpenKnowledge, onOpenConceptExplorer }: Props) {
+export function FlowchartPage({ entries, viewStates: externalViewStates, onOpenKnowledge, onOpenConceptExplorer, onEntryCreated }: Props) {
   const ownViewStates = useRef(createViewStateStore());
   const viewStates = externalViewStates ?? ownViewStates.current;
 
@@ -48,14 +48,15 @@ export function FlowchartPage({ entries, viewStates: externalViewStates, onOpenK
   const [detail, setDetail] = useState<FlowchartDetail | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
   const [conceptId, setConceptId] = useState<number | null>(null);
-  const [quickPanel, setQuickPanel] = useState<QuickPanel>(null);
+  const [creationRequest, setCreationRequest] = useState<CreationRequest | null>(null);
+  /** The one node currently in inline label-edit mode on the canvas, if any — set right after "Add step". */
+  const [editingNodeId, setEditingNodeId] = useState<number | null>(null);
   const [layoutRevision, setLayoutRevision] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const selections = useRef(new Map<number, Selection>());
 
   const currentId = path.length ? path[path.length - 1] : null;
-  const folders = useMemo(() => entries.filter((entry) => entry.entry_type === 'folder'), [entries]);
 
   const loadFlowcharts = useCallback(async () => {
     try {
@@ -247,6 +248,53 @@ export function FlowchartPage({ entries, viewStates: externalViewStates, onOpenK
   }));
   const emptyWorkspace = listLoaded && flowcharts.length === 0 && currentId === null;
 
+  async function handleFlowchartCreated(flowchart: Flowchart) {
+    await loadFlowcharts();
+    openFlowchart(flowchart.id);
+  }
+
+  /**
+   * Creates a "New step" node immediately — no form first. The canvas is the primary editor: the node appears
+   * there right away, selected, and immediately editable inline (its label input is autofocused); the existing
+   * NodeInspector remains available for description/type/concept once the inline rename is done. A new node
+   * always changes the flowchart's shape, so `refreshCurrent()` (and the relayout it triggers by changing
+   * FlowchartCanvas's structural signature) is unavoidable here — there's no way to add a node without it, and
+   * that's true today for any shape-changing edit (see `saveNode` below), not something this feature introduces.
+   * The node is created with no x/y, so the existing automatic-layout fallback places it, same as any other
+   * auto-positioned node; no extra placement logic is needed (see the final report for why viewport-relative
+   * placement was not attempted).
+   */
+  async function addStep(flowchartId: number) {
+    try {
+      const node = await api.createFlowNode(flowchartId, { label: 'New step' });
+      if (flowchartId !== currentId) {
+        // Not currently open: jump to it, same as left-clicking that flowchart in the sidebar already does.
+        openFlowchart(flowchartId);
+        void loadFlowcharts();
+      } else {
+        await refreshCurrent();
+      }
+      setSelection({ kind: 'node', id: node.id });
+      setEditingNodeId(node.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not add the step');
+    }
+  }
+
+  async function renameNode(nodeId: number, label: string) {
+    try {
+      await saveNode(nodeId, { label });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save the step name');
+    } finally {
+      setEditingNodeId(null);
+    }
+  }
+
+  function cancelEditNode() {
+    setEditingNodeId(null);
+  }
+
   return (
     <div className="proto-app flow-app" data-testid="flowchart-page">
       <header className="proto-topbar flow-topbar">
@@ -273,7 +321,7 @@ export function FlowchartPage({ entries, viewStates: externalViewStates, onOpenK
               <ArrowLeft size={15} />
             </button>
           )}
-          <button type="button" className="flow-tool-btn" onClick={() => setQuickPanel('node')} disabled={!detail}>
+          <button type="button" className="flow-tool-btn" onClick={() => detail && void addStep(detail.flowchart.id)} disabled={!detail}>
             <Plus size={15} /> Add step
           </button>
           <button type="button" className="flow-tool-btn" onClick={() => void reorganize()} disabled={!detail} title="Run the automatic layout again">
@@ -288,13 +336,18 @@ export function FlowchartPage({ entries, viewStates: externalViewStates, onOpenK
           flowcharts={flowcharts}
           concepts={concepts}
           currentFlowchartId={currentId}
+          currentFolderId={detail?.flowchart.folder_id ?? null}
+          creationRequest={creationRequest}
+          onRequestCreation={setCreationRequest}
           onOpenFlowchart={openFlowchart}
           onSelectConcept={(id) => {
             setSelection(null);
             setConceptId(id);
           }}
-          onNewFlowchart={() => setQuickPanel('flowchart')}
           onOpenKnowledge={onOpenKnowledge}
+          onEntryCreated={(entry) => onEntryCreated?.(entry)}
+          onFlowchartCreated={(flowchart) => void handleFlowchartCreated(flowchart)}
+          onAddStep={(flowchartId) => void addStep(flowchartId)}
         />
 
         <main className="flow-stage">
@@ -305,6 +358,7 @@ export function FlowchartPage({ entries, viewStates: externalViewStates, onOpenK
               layoutRevision={layoutRevision}
               selectedNodeId={selection?.kind === 'node' ? selection.id : null}
               selectedEdgeId={selection?.kind === 'edge' ? selection.id : null}
+              editingNodeId={editingNodeId}
               onSelectNode={(id) => {
                 setConceptId(null);
                 setSelection({ kind: 'node', id });
@@ -323,25 +377,30 @@ export function FlowchartPage({ entries, viewStates: externalViewStates, onOpenK
               }}
               onNodeMoved={saveNodePosition}
               onConnect={(source, target) => void connect(source, target)}
+              onRenameNode={(nodeId, label) => void renameNode(nodeId, label)}
+              onCancelEditNode={cancelEditNode}
             />
           )}
 
           {emptyWorkspace && (
             <div className="flow-empty">
-              <button type="button" className="flow-btn flow-btn-primary" onClick={() => setQuickPanel('flowchart')}>
+              <button type="button" className="flow-btn flow-btn-primary" onClick={() => setCreationRequest({ kind: 'flowchart', parentId: null })}>
                 <Plus size={15} /> Create your first flowchart
               </button>
             </div>
           )}
           {detail && detail.nodes.length === 0 && !loading && (
             <div className="flow-empty">
-              <button type="button" className="flow-btn flow-btn-primary" onClick={() => setQuickPanel('node')}>
+              <button type="button" className="flow-btn flow-btn-primary" onClick={() => void addStep(detail.flowchart.id)}>
                 <Plus size={15} /> Add the first step
               </button>
             </div>
           )}
 
-          {selectedNode && (
+          {/* Suppressed while this node is being renamed inline: the inspector's own "Step name" field only
+              syncs from the node on mount, so keeping both open at once could show it a stale label. Hiding it
+              during the inline edit forces a fresh mount (with the saved label) once the rename finishes. */}
+          {selectedNode && editingNodeId !== selectedNode.id && (
             <NodeInspector
               key={selectedNode.id}
               node={selectedNode}
@@ -375,33 +434,6 @@ export function FlowchartPage({ entries, viewStates: externalViewStates, onOpenK
           )}
         </main>
       </div>
-
-      {quickPanel === 'flowchart' && (
-        <FloatingPanel title="New flowchart" onClose={() => setQuickPanel(null)}>
-          <NewFlowchartForm
-            folders={folders}
-            defaultFolderId={detail?.flowchart.folder_id ?? null}
-            onCreated={async (flowchart) => {
-              setQuickPanel(null);
-              await loadFlowcharts();
-              openFlowchart(flowchart.id);
-            }}
-          />
-        </FloatingPanel>
-      )}
-      {quickPanel === 'node' && detail && (
-        <FloatingPanel title="Add step" onClose={() => setQuickPanel(null)}>
-          <AddNodeForm
-            concepts={concepts}
-            flowchartId={detail.flowchart.id}
-            onCreated={async (node) => {
-              setQuickPanel(null);
-              await refreshCurrent();
-              setSelection({ kind: 'node', id: node.id });
-            }}
-          />
-        </FloatingPanel>
-      )}
     </div>
   );
 }

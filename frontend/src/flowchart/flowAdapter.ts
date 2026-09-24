@@ -4,6 +4,7 @@ import type { FlowNode, FlowchartDetail } from '../types';
 import type { LayoutEdgeInput, LayoutNodeInput, Point } from './elkLayout';
 import type { ValidatedFlowLayout } from './flowLayout';
 import { edgeVisual, estimateNodeSize, nodeVisual } from './flowStyles';
+import type { NodeLabelEditing } from './NodeLabelEditor';
 
 export const nodeElementId = (id: number) => `n${id}`;
 export const edgeElementId = (id: number) => `e${id}`;
@@ -17,6 +18,8 @@ export type FlowNodeData = Record<string, unknown> & {
   conceptName: string | null;
   width: number;
   height: number;
+  /** Set only for the single node currently being renamed inline on the canvas (see FlowchartCanvas.renderNodes). */
+  editing?: NodeLabelEditing;
 };
 
 export type FlowEdgeData = Record<string, unknown> & {

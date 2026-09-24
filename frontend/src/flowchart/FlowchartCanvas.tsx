@@ -41,12 +41,16 @@ type Props = {
   layoutRevision: number;
   selectedNodeId: number | null;
   selectedEdgeId: number | null;
+  /** The one node currently in inline label-edit mode, if any (set right after "Add step" creates it). */
+  editingNodeId: number | null;
   onSelectNode: (nodeId: number) => void;
   onSelectEdge: (edgeId: number) => void;
   onClearSelection: () => void;
   onOpenDetail: (nodeId: number) => void;
   onNodeMoved: (nodeId: number, position: Point) => void;
   onConnect: (sourceNodeId: number, targetNodeId: number) => void;
+  onRenameNode: (nodeId: number, label: string) => void;
+  onCancelEditNode: () => void;
 };
 
 /**
@@ -99,12 +103,15 @@ function FlowchartCanvasInner({
   layoutRevision,
   selectedNodeId,
   selectedEdgeId,
+  editingNodeId,
   onSelectNode,
   onSelectEdge,
   onClearSelection,
   onOpenDetail,
   onNodeMoved,
   onConnect,
+  onRenameNode,
+  onCancelEditNode,
 }: Props) {
   const flowchartId = detail.flowchart.id;
   const rf = useReactFlow();
@@ -135,8 +142,8 @@ function FlowchartCanvasInner({
   const viewportRef = useRef<Viewport>(initial?.viewport ?? { x: 0, y: 0, zoom: 1 });
   const appliedSignature = useRef<string | null>(initial ? signature : null);
   const appliedRevision = useRef(layoutRevision);
-  const callbacks = useRef({ onSelectNode, onSelectEdge, onClearSelection, onOpenDetail, onNodeMoved, onConnect });
-  callbacks.current = { onSelectNode, onSelectEdge, onClearSelection, onOpenDetail, onNodeMoved, onConnect };
+  const callbacks = useRef({ onSelectNode, onSelectEdge, onClearSelection, onOpenDetail, onNodeMoved, onConnect, onRenameNode, onCancelEditNode });
+  callbacks.current = { onSelectNode, onSelectEdge, onClearSelection, onOpenDetail, onNodeMoved, onConnect, onRenameNode, onCancelEditNode };
 
   const saveState = useCallback(() => {
     if (appliedSignature.current === null) return;
@@ -216,10 +223,27 @@ function FlowchartCanvasInner({
     if (applicable.length) setNodes((previous) => applyNodeChanges(applicable, previous));
   }, []);
 
-  const renderNodes = useMemo(
-    () => nodes.map((node) => (node.id === (selectedNodeId !== null ? nodeElementId(selectedNodeId) : null) ? { ...node, selected: true } : node)),
-    [nodes, selectedNodeId],
-  );
+  const renderNodes = useMemo(() => {
+    const selectedElementId = selectedNodeId !== null ? nodeElementId(selectedNodeId) : null;
+    const editingElementId = editingNodeId !== null ? nodeElementId(editingNodeId) : null;
+    return nodes.map((node) => {
+      if (node.id !== selectedElementId && node.id !== editingElementId) return node;
+      const next = node.id === selectedElementId ? { ...node, selected: true } : node;
+      if (node.id !== editingElementId) return next;
+      const id = parseNodeElementId(node.id);
+      if (id === null) return next;
+      return {
+        ...next,
+        data: {
+          ...next.data,
+          editing: {
+            onSave: (label: string) => callbacks.current.onRenameNode(id, label),
+            onCancel: () => callbacks.current.onCancelEditNode(),
+          },
+        },
+      };
+    });
+  }, [nodes, selectedNodeId, editingNodeId]);
 
   const edges = useMemo(() => {
     const built = buildFlowEdges(detail, layout, routed);

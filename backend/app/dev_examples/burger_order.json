@@ -1,0 +1,52 @@
+{
+  "folder": "Dev Examples",
+  "flowcharts": [
+    {
+      "key": "burger_order",
+      "name": "Burger order",
+      "description": "From order intake through a payment retry loop to hand-off to the kitchen.",
+      "nodes": [
+        { "key": "start", "label": "Customer arrives", "type": "start" },
+        { "key": "choose_burger", "label": "Choose burger", "type": "process" },
+        { "key": "choose_size", "label": "Choose size", "type": "process" },
+        { "key": "choose_toppings", "label": "Choose toppings", "type": "process" },
+        { "key": "fries_q", "label": "Add fries?", "type": "decision" },
+        { "key": "add_fries", "label": "Add fries", "type": "process" },
+        { "key": "drink_q", "label": "Add drink?", "type": "decision" },
+        { "key": "choose_drink", "label": "Choose drink", "type": "process" },
+        { "key": "review", "label": "Review order", "type": "process" },
+        { "key": "submit", "label": "Submit order", "type": "process" },
+        { "key": "payment_q", "label": "Payment accepted?", "type": "decision" },
+        { "key": "send_kitchen", "label": "Send to kitchen", "type": "process" },
+        { "key": "prepare", "label": "Prepare burger", "type": "process" },
+        { "key": "assemble", "label": "Assemble order", "type": "process" },
+        { "key": "ready", "label": "Mark ready", "type": "process" },
+        { "key": "receive", "label": "Customer receives order", "type": "process" },
+        { "key": "end", "label": "Order complete", "type": "end" },
+        { "key": "retry_payment", "label": "Retry payment", "type": "process" }
+      ],
+      "edges": [
+        { "from": "start", "to": "choose_burger", "type": "normal" },
+        { "from": "choose_burger", "to": "choose_size", "type": "normal" },
+        { "from": "choose_size", "to": "choose_toppings", "type": "normal" },
+        { "from": "choose_toppings", "to": "fries_q", "type": "normal" },
+        { "from": "fries_q", "to": "add_fries", "type": "yes", "label": "YES" },
+        { "from": "add_fries", "to": "drink_q", "type": "normal" },
+        { "from": "fries_q", "to": "drink_q", "type": "no", "label": "NO" },
+        { "from": "drink_q", "to": "choose_drink", "type": "yes", "label": "YES" },
+        { "from": "choose_drink", "to": "review", "type": "normal" },
+        { "from": "drink_q", "to": "review", "type": "no", "label": "NO" },
+        { "from": "review", "to": "submit", "type": "normal" },
+        { "from": "submit", "to": "payment_q", "type": "normal" },
+        { "from": "payment_q", "to": "send_kitchen", "type": "yes", "label": "YES" },
+        { "from": "send_kitchen", "to": "prepare", "type": "normal" },
+        { "from": "prepare", "to": "assemble", "type": "normal" },
+        { "from": "assemble", "to": "ready", "type": "normal" },
+        { "from": "ready", "to": "receive", "type": "normal" },
+        { "from": "receive", "to": "end", "type": "normal" },
+        { "from": "payment_q", "to": "retry_payment", "type": "no", "label": "NO" },
+        { "from": "retry_payment", "to": "payment_q", "type": "retry", "label": "RETRY" }
+      ]
+    }
+  ]
+}

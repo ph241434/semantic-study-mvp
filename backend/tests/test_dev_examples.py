@@ -32,9 +32,9 @@ def test_dev_examples_load_idempotently_and_never_touch_existing_rows(db_session
     db_session.commit()
 
     first = load_dev_examples(db_session)
-    assert len(first) == 4
+    assert len(first) == 5
     assert load_dev_examples(db_session) == []
-    assert db_session.query(models.Flowchart).count() == 4
+    assert db_session.query(models.Flowchart).count() == 5
     assert db_session.get(models.KnowledgeEntry, existing_folder.id).name == "Mine"
     assert db_session.query(models.KnowledgeEntry).filter_by(name="Dev Examples", entry_type="folder").count() == 1
 
@@ -61,6 +61,31 @@ def test_dev_examples_are_real_directed_graphs_not_trees(db_session: Session):
     assert update.child_flowchart.name == "Update distance"
     service = db_session.query(models.Flowchart).filter_by(name="Shortest-path service").one()
     assert next(n for n in service.nodes if n.label == "Run shortest-path algorithm").child_flowchart_id == dijkstra.id
+
+
+def test_burger_order_example_has_decisions_merges_and_a_retry_loop(db_session: Session):
+    load_dev_examples(db_session)
+    chart = db_session.query(models.Flowchart).filter_by(name="Burger order").one()
+
+    decisions = [node for node in chart.nodes if node.node_type == "decision"]
+    assert len(decisions) >= 2
+    assert any(node.node_type == "start" for node in chart.nodes)
+    assert any(node.node_type == "end" for node in chart.nodes)
+
+    incoming = Counter(edge.target_node_id for edge in chart.edges)
+    assert max(incoming.values()) >= 2  # at least one merge
+
+    outgoing = Counter(edge.source_node_id for edge in chart.edges)
+    decision_ids = {node.id for node in decisions}
+    assert any(outgoing[node_id] >= 2 for node_id in decision_ids)  # a decision with multiple outgoing edges
+
+    retry_edges = [edge for edge in chart.edges if edge.edge_type == "retry"]
+    assert retry_edges
+    assert has_cycle(chart)  # a real loop, not a tree
+
+    labeled = {(edge.edge_type, edge.label) for edge in chart.edges}
+    assert ("yes", "YES") in labeled
+    assert ("no", "NO") in labeled
 
 
 def test_used_by_count_distinguishes_top_level_from_detail_flowcharts(client: TestClient, db_session: Session):

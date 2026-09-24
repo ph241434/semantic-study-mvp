@@ -11,12 +11,15 @@ vi.mock('../flowchart/FlowchartCanvas', () => ({
     detail,
     layoutRevision,
     selectedNodeId,
+    editingNodeId,
     onSelectNode,
     onSelectEdge,
     onClearSelection,
     onOpenDetail,
     onNodeMoved,
     onConnect,
+    onRenameNode,
+    onCancelEditNode,
   }: any) => {
     canvasRenders.count += 1;
     return (
@@ -26,6 +29,7 @@ vi.mock('../flowchart/FlowchartCanvas', () => ({
         data-node-count={detail.nodes.length}
         data-edge-count={detail.edges.length}
         data-selected={selectedNodeId ?? ''}
+        data-editing={editingNodeId ?? ''}
         data-revision={layoutRevision}
       >
         {detail.nodes.map((node: FlowNode) => (
@@ -50,6 +54,16 @@ vi.mock('../flowchart/FlowchartCanvas', () => ({
         <button type="button" onClick={() => onConnect(detail.nodes[2].id, detail.nodes[0].id)}>
           connect third to first
         </button>
+        {editingNodeId !== null && (
+          <>
+            <button type="button" onClick={() => onRenameNode(editingNodeId, 'Choose toppings')}>
+              save inline rename
+            </button>
+            <button type="button" onClick={() => onCancelEditNode()}>
+              cancel inline rename
+            </button>
+          </>
+        )}
       </div>
     );
   },
@@ -64,6 +78,7 @@ vi.mock('../api/client', () => ({
     createFlowchart: vi.fn(),
     createFlowNode: vi.fn(),
     createFlowEdge: vi.fn(),
+    createKnowledgeEntry: vi.fn(),
     updateFlowNode: vi.fn(),
     updateFlowEdge: vi.fn(),
     deleteFlowNode: vi.fn(),
@@ -234,7 +249,7 @@ describe('FlowchartPage: hierarchical flowchart workspace', () => {
       const navigator = screen.getByTestId('flow-navigator');
       expect(within(navigator).getByText('Security')).toBeInTheDocument();
       expect(within(navigator).getByText('Gmail E2EE')).toBeInTheDocument();
-      expect(within(navigator).queryByText('Empty folder')).not.toBeInTheDocument(); // no flowcharts inside
+      expect(within(navigator).getByText('Empty folder')).toBeInTheDocument(); // persisted folders always show, even empty
       expect(within(navigator).getByRole('button', { name: /Encryption Process/ })).toHaveTextContent('detail');
       expect(within(navigator).getByText('Unfiled')).toBeInTheDocument();
       expect(within(navigator).queryByText('Nonce')).not.toBeInTheDocument(); // concepts are collapsed by default
@@ -242,11 +257,13 @@ describe('FlowchartPage: hierarchical flowchart workspace', () => {
       expect(await within(navigator).findByRole('button', { name: 'Nonce' })).toBeInTheDocument();
     });
 
-    it('builds the folder tree from the knowledge entries', () => {
+    it('builds the folder tree from the knowledge entries, including a folder that holds nothing yet', () => {
       const tree = buildFolderTree(entries, flowcharts);
-      expect(tree.folders.map((item) => item.entry.name)).toEqual(['Security']);
+      expect(tree.folders.map((item) => item.entry.name)).toEqual(['Security', 'Empty folder']);
       expect(tree.folders[0].children[0].entry.name).toBe('Gmail E2EE');
       expect(tree.folders[0].children[0].flowcharts.map((item) => item.name)).toEqual(['Gmail Encryption System', 'Encryption Process']);
+      expect(tree.folders[1].children).toEqual([]);
+      expect(tree.folders[1].flowcharts).toEqual([]);
       expect(tree.unfiled.map((item) => item.name)).toEqual(['Loose notes']);
     });
 
@@ -286,6 +303,103 @@ describe('FlowchartPage: hierarchical flowchart workspace', () => {
       await openPage({ onOpenKnowledge });
       fireEvent.click(screen.getByRole('button', { name: 'Knowledge browser' }));
       expect(onOpenKnowledge).toHaveBeenCalled();
+    });
+  });
+
+  describe('sidebar right-click creation', () => {
+    it('right-clicking the root area shows New folder / New flowchart, and no centered modal ever appears', async () => {
+      await openPage();
+      const navigator = screen.getByTestId('flow-navigator');
+      fireEvent.contextMenu(within(navigator).getByTestId('flow-nav-scroll'));
+      const menu = await screen.findByRole('menu');
+      expect(within(menu).getByRole('menuitem', { name: 'New folder' })).toBeInTheDocument();
+      expect(within(menu).getByRole('menuitem', { name: 'New flowchart' })).toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it("right-clicking a flowchart shows only Add step", async () => {
+      await openPage();
+      const navigator = screen.getByTestId('flow-navigator');
+      fireEvent.contextMenu(within(navigator).getByRole('button', { name: /Gmail Encryption System/ }));
+      const menu = await screen.findByRole('menu');
+      expect(within(menu).getAllByRole('menuitem')).toHaveLength(1);
+      expect(within(menu).getByRole('menuitem', { name: 'Add step' })).toBeInTheDocument();
+    });
+
+    it('Add step on the currently open flowchart creates the node immediately and enters inline edit — no form, no inspector yet', async () => {
+      const created = node(30, 1, 'New step', 'process');
+      vi.mocked(api.createFlowNode).mockResolvedValue(created);
+      vi.mocked(api.flowchart).mockImplementation(async (id: number) => (id === 1 ? detail(flowcharts[0], [...project.nodes, created]) : encryption));
+      await openPage(); // opens flowchart 1
+      const navigator = screen.getByTestId('flow-navigator');
+
+      fireEvent.contextMenu(within(navigator).getByRole('button', { name: /Gmail Encryption System/ }));
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Add step' }));
+
+      await waitFor(() => expect(api.createFlowNode).toHaveBeenCalledWith(1, { label: 'New step' }));
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      expect(screen.queryByRole('group')).not.toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      await waitFor(() => expect(canvas()).toHaveAttribute('data-editing', '30')); // inline-editing on the canvas, not the form
+      expect(screen.queryByTestId('flow-inspector')).not.toBeInTheDocument();
+    });
+
+    it('Add step on a flowchart that is NOT open navigates to it (like left-clicking it already does), with the new step selected and inline-editing', async () => {
+      const created = node(40, 2, 'New step', 'process');
+      vi.mocked(api.createFlowNode).mockResolvedValue(created);
+      // Once the step is created, a fresh GET of flowchart 2 must include it — like the real backend would.
+      vi.mocked(api.flowchart).mockImplementation(async (id: number) =>
+        id === 1 ? project : id === 2 ? detail(flowcharts[1], [...encryption.nodes, created]) : encryption,
+      );
+      await openPage(); // opens flowchart 1; flowchart 2 ("Encryption Process") is not open
+      const navigator = screen.getByTestId('flow-navigator');
+
+      fireEvent.contextMenu(within(navigator).getByRole('button', { name: /Encryption Process/ }));
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Add step' }));
+
+      await waitFor(() => expect(api.createFlowNode).toHaveBeenCalledWith(2, { label: 'New step' }));
+      await waitFor(() => expect(canvas()).toHaveAttribute('data-flowchart-id', '2')); // navigated, same as a left-click would
+      expect(breadcrumb()).toHaveTextContent('Encryption Process');
+      expect(canvas()).toHaveAttribute('data-editing', '40');
+      expect(screen.queryByTestId('flow-inspector')).not.toBeInTheDocument();
+    });
+
+    it("creates a nested flowchart from a folder's context menu, with no folder dropdown, assigning folder_id automatically", async () => {
+      const created = flowchart(8, 'Gmail E2EE v2', 2, 0);
+      vi.mocked(api.createFlowchart).mockResolvedValue(created);
+      vi.mocked(api.flowchart).mockImplementation(async (id: number) => (id === 8 ? detail(created, []) : id === 1 ? project : encryption));
+      await openPage();
+      const navigator = screen.getByTestId('flow-navigator');
+
+      fireEvent.contextMenu(within(navigator).getByRole('button', { name: /Gmail E2EE/ }));
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'New flowchart' }));
+
+      const panel = await within(navigator).findByRole('group', { name: 'New flowchart' });
+      expect(within(panel).queryByLabelText('Folder')).not.toBeInTheDocument();
+      expect(within(panel).queryByRole('combobox')).not.toBeInTheDocument();
+      fireEvent.change(within(panel).getByLabelText('Flowchart name'), { target: { value: 'Gmail E2EE v2' } });
+      fireEvent.click(within(panel).getByRole('button', { name: /Create flowchart/ }));
+
+      await waitFor(() => expect(api.createFlowchart).toHaveBeenCalledWith({ name: 'Gmail E2EE v2', description: '', folder_id: 2 }));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('closes the context menu after a selection and on outside click, without breaking normal left-click navigation', async () => {
+      await openPage();
+      const navigator = screen.getByTestId('flow-navigator');
+
+      fireEvent.contextMenu(within(navigator).getByRole('button', { name: /Gmail E2EE/ }));
+      await screen.findByRole('menu');
+      fireEvent.mouseDown(document.body);
+      await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+
+      fireEvent.contextMenu(within(navigator).getByRole('button', { name: /Gmail E2EE/ }));
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'New folder' }));
+      await within(navigator).findByRole('group', { name: 'New folder' });
+      await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument()); // closes right after selection
+
+      fireEvent.click(within(navigator).getByRole('button', { name: /Encryption Process/ }));
+      await waitFor(() => expect(canvas()).toHaveAttribute('data-flowchart-id', '2'));
     });
   });
 
@@ -391,22 +505,54 @@ describe('FlowchartPage: hierarchical flowchart workspace', () => {
       );
     });
 
-    it('adds a step from the toolbar with its type and description', async () => {
-      const created = node(30, 1, 'Log result', 'data', { description: 'Write the audit record.' });
+    it('adding a step from the toolbar creates it immediately, selects it, and enters inline editing — no form, no inspector until renamed', async () => {
+      const created = node(30, 1, 'New step', 'process');
+      const renamed = { ...created, label: 'Choose toppings' };
       vi.mocked(api.createFlowNode).mockResolvedValue(created);
+      // Once the step is created, a fresh GET of flowchart 1 must include it — like the real backend would.
+      vi.mocked(api.flowchart).mockImplementation(async (id: number) => (id === 1 ? detail(flowcharts[0], [...project.nodes, created]) : encryption));
       await openPage();
 
       fireEvent.click(screen.getByRole('button', { name: /Add step/ }));
-      const dialog = await screen.findByRole('dialog', { name: 'Add step' });
-      fireEvent.change(within(dialog).getByLabelText('Step name'), { target: { value: 'Log result' } });
-      fireEvent.change(within(dialog).getByLabelText('Node type'), { target: { value: 'data' } });
-      fireEvent.change(within(dialog).getByLabelText('Description'), { target: { value: 'Write the audit record.' } });
-      fireEvent.click(within(dialog).getByRole('button', { name: /Add step/ }));
 
-      await waitFor(() =>
-        expect(api.createFlowNode).toHaveBeenCalledWith(1, { label: 'Log result', description: 'Write the audit record.', node_type: 'data', concept_id: null }),
-      );
-      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      await waitFor(() => expect(api.createFlowNode).toHaveBeenCalledWith(1, { label: 'New step' }));
+      expect(screen.queryByRole('group')).not.toBeInTheDocument(); // no AddNodeForm, no sidebar form anywhere
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      await waitFor(() => expect(canvas()).toHaveAttribute('data-editing', '30'));
+      expect(canvas()).toHaveAttribute('data-selected', '30');
+      expect(screen.queryByTestId('flow-inspector')).not.toBeInTheDocument(); // inline edit first, not the form-based inspector
+
+      // The node's inline label editor (rendered on the real canvas) saves via updateFlowNode; the mock canvas
+      // exposes that same callback as a button, the same way it exposes drag/connect elsewhere in this file.
+      vi.mocked(api.flowchart).mockImplementation(async (id: number) => (id === 1 ? detail(flowcharts[0], [...project.nodes, renamed]) : encryption));
+      fireEvent.click(within(canvas()).getByRole('button', { name: 'save inline rename' }));
+
+      await waitFor(() => expect(api.updateFlowNode).toHaveBeenCalledWith(30, { label: 'Choose toppings' }));
+      await waitFor(() => expect(canvas()).toHaveAttribute('data-editing', '')); // editing ends after save
+      expect(canvas()).toHaveAttribute('data-selected', '30'); // stays selected
+
+      const inspector = await screen.findByTestId('flow-inspector');
+      expect(within(inspector).getByLabelText('Step name')).toHaveValue('Choose toppings'); // reflects the saved name, not stale
+      expect(within(inspector).getByLabelText('Node type')).toBeInTheDocument();
+      expect(within(inspector).getByLabelText('Linked concept')).toBeInTheDocument();
+    });
+
+    it('cancelling the inline edit (Escape) keeps "New step" and never calls updateFlowNode', async () => {
+      const created = node(31, 1, 'New step', 'process');
+      vi.mocked(api.createFlowNode).mockResolvedValue(created);
+      vi.mocked(api.flowchart).mockImplementation(async (id: number) => (id === 1 ? detail(flowcharts[0], [...project.nodes, created]) : encryption));
+      await openPage();
+
+      fireEvent.click(screen.getByRole('button', { name: /Add step/ }));
+      await waitFor(() => expect(canvas()).toHaveAttribute('data-editing', '31'));
+
+      fireEvent.click(within(canvas()).getByRole('button', { name: 'cancel inline rename' }));
+
+      expect(api.updateFlowNode).not.toHaveBeenCalled();
+      await waitFor(() => expect(canvas()).toHaveAttribute('data-editing', ''));
+      const inspector = await screen.findByTestId('flow-inspector');
+      expect(within(inspector).getByLabelText('Step name')).toHaveValue('New step'); // reverted, not deleted or duplicated
+      expect(canvas()).toHaveAttribute('data-node-count', String(project.nodes.length + 1)); // still exactly one new node
     });
 
     it('edits a description without changing the graph shape, but re-reads the flowchart when the label changes', async () => {

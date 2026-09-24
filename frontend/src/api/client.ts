@@ -87,6 +87,8 @@ export const api = {
   dashboard: () => request<Dashboard>('/dashboard'),
   search: (q: string) => request<Concept[]>(`/search?q=${encodeURIComponent(q)}`),
   knowledge: () => request<KnowledgeEntry[]>('/knowledge'),
+  createKnowledgeEntry: (payload: { name: string; parent_id: number | null }) =>
+    request<KnowledgeEntry>('/knowledge', { method: 'POST', body: JSON.stringify(payload) }),
   flowcharts: () => request<Flowchart[]>('/flowcharts'),
   flowchart: (id: number) => request<FlowchartDetail>(`/flowcharts/${id}`),
   createFlowchart: (payload: { name: string; description?: string; folder_id?: number | null }) =>

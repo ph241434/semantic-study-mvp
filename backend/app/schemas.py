@@ -213,6 +213,19 @@ class KnowledgeEntryRead(BaseModel):
     sort_order: int
 
 
+class KnowledgeEntryCreate(BaseModel):
+    """POST body. Only folders are created through this endpoint; concept entries are seeded separately."""
+
+    name: str = Field(min_length=1, max_length=140)
+    parent_id: int | None = None
+    entry_type: Literal["folder"] = "folder"
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        return value.strip()
+
+
 class GraphResponse(BaseModel):
     center_id: int
     depth: int

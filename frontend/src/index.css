@@ -1271,6 +1271,25 @@ textarea {
   -webkit-line-clamp: 3;
 }
 
+.flow-node-label-input {
+  position: relative;
+  z-index: 1;
+  width: min(84%, calc(100% - 20px));
+  padding: 1px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 4px;
+  background: rgba(6, 8, 11, 0.65);
+  color: inherit;
+  font: inherit;
+  text-align: center;
+  cursor: text;
+}
+
+.flow-node-label-input:focus {
+  outline: none;
+  border-color: #ffffff;
+}
+
 .flow-node-diamond .flow-node-label {
   padding: 0 26%;
 }
@@ -1706,38 +1725,60 @@ textarea {
   font-size: 13px;
 }
 
-.flow-modal-backdrop {
-  position: absolute;
-  inset: 0;
-  z-index: 50;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 84px 16px 16px;
-  background: rgba(6, 8, 11, 0.55);
-}
-
-.flow-modal {
-  width: min(460px, 100%);
-  padding: 16px;
+.flow-inline-panel {
+  margin: 4px 6px 8px;
+  padding: 10px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 9px;
-  background: rgba(16, 19, 24, 0.98);
-  box-shadow: 0 26px 90px rgba(4, 6, 8, 0.65);
-  color: #f8f7f2;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
 }
 
-.flow-modal-header {
+.flow-inline-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
-.flow-modal-header h2 {
+.flow-inline-panel-header h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: 12px;
   font-weight: 800;
+  letter-spacing: 0.02em;
+  color: rgba(248, 247, 242, 0.85);
+}
+
+.flow-form-context {
+  margin: 0 0 2px;
+  color: rgba(248, 247, 242, 0.5);
+  font-size: 12px;
+}
+
+.flow-context-menu {
+  z-index: 60;
+  min-width: 160px;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(16, 19, 24, 0.98);
+  box-shadow: 0 18px 50px rgba(4, 6, 8, 0.55);
+}
+
+.flow-context-menu-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #f8f7f2;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.flow-context-menu-item:hover {
+  background: rgba(255, 255, 255, 0.09);
 }
 
 @media (max-width: 820px) {

@@ -2,22 +2,21 @@ import { Plus, X } from 'lucide-react';
 import { useState, type FormEvent, type ReactNode } from 'react';
 
 import { api } from '../api/client';
-import type { Concept, FlowNode, FlowNodeType, Flowchart, KnowledgeEntry } from '../types';
+import type { Concept, FlowNodeType, Flowchart, KnowledgeEntry } from '../types';
 import { FLOW_NODE_TYPES, nodeVisual } from './flowStyles';
 
-export function FloatingPanel({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+/** Compact, non-modal wrapper for a creation form rendered inline next to the sidebar row it belongs to. */
+export function InlineCreatePanel({ title, onCancel, children }: { title: string; onCancel: () => void; children: ReactNode }) {
   return (
-    <div className="flow-modal-backdrop" role="presentation">
-      <section className="flow-modal" role="dialog" aria-modal="true" aria-label={title}>
-        <header className="flow-modal-header">
-          <h2>{title}</h2>
-          <button type="button" className="flow-icon-btn" onClick={onClose} title="Close" aria-label="Close">
-            <X size={16} />
-          </button>
-        </header>
-        {children}
-      </section>
-    </div>
+    <section className="flow-inline-panel" role="group" aria-label={title}>
+      <header className="flow-inline-panel-header">
+        <h3>{title}</h3>
+        <button type="button" className="flow-icon-btn" onClick={onCancel} title="Cancel" aria-label="Cancel">
+          <X size={14} />
+        </button>
+      </header>
+      {children}
+    </section>
   );
 }
 
@@ -59,77 +58,17 @@ export function ConceptSelect({
   );
 }
 
-export function AddNodeForm({
-  concepts,
-  flowchartId,
-  onCreated,
-}: {
-  concepts: Concept[];
-  flowchartId: number;
-  onCreated: (node: FlowNode) => void;
-}) {
-  const [label, setLabel] = useState('');
-  const [nodeType, setNodeType] = useState<FlowNodeType>('process');
-  const [conceptId, setConceptId] = useState<number | null>(null);
-  const [description, setDescription] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (!label.trim()) return;
-    setSaving(true);
-    setError(null);
-    try {
-      onCreated(await api.createFlowNode(flowchartId, { label, description, node_type: nodeType, concept_id: conceptId }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not add the step');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <form className="flow-form" onSubmit={submit}>
-      <input className="flow-input" aria-label="Step name" placeholder="Step name" value={label} onChange={(event) => setLabel(event.target.value)} autoFocus />
-      <NodeTypeSelect value={nodeType} onChange={setNodeType} />
-      <ConceptSelect
-        concepts={concepts}
-        value={conceptId}
-        onChange={(id) => {
-          setConceptId(id);
-          const concept = concepts.find((item) => item.id === id);
-          if (concept && !label.trim()) setLabel(concept.name);
-        }}
-      />
-      <textarea
-        className="flow-input flow-textarea"
-        aria-label="Description"
-        placeholder="Description: what happens in this step"
-        rows={3}
-        value={description}
-        onChange={(event) => setDescription(event.target.value)}
-      />
-      {error && <p className="flow-error">{error}</p>}
-      <button type="submit" className="flow-btn flow-btn-primary" disabled={saving || !label.trim()}>
-        <Plus size={15} /> Add step
-      </button>
-    </form>
-  );
-}
-
 export function NewFlowchartForm({
-  folders,
-  defaultFolderId,
+  folderId,
+  folderName,
   onCreated,
 }: {
-  folders: KnowledgeEntry[];
-  defaultFolderId: number | null;
+  folderId: number | null;
+  folderName: string | null;
   onCreated: (flowchart: Flowchart) => void;
 }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [folderId, setFolderId] = useState<number | null>(defaultFolderId);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -149,6 +88,7 @@ export function NewFlowchartForm({
 
   return (
     <form className="flow-form" onSubmit={submit}>
+      <p className="flow-form-context">{folderName ? `In ${folderName}` : 'At the top level'}</p>
       <input className="flow-input" aria-label="Flowchart name" placeholder="Flowchart name" value={name} onChange={(event) => setName(event.target.value)} autoFocus />
       <textarea
         className="flow-input flow-textarea"
@@ -158,22 +98,48 @@ export function NewFlowchartForm({
         value={description}
         onChange={(event) => setDescription(event.target.value)}
       />
-      <select
-        className="flow-input"
-        aria-label="Folder"
-        value={folderId ?? ''}
-        onChange={(event) => setFolderId(event.target.value ? Number(event.target.value) : null)}
-      >
-        <option value="">No folder</option>
-        {folders.map((folder) => (
-          <option key={folder.id} value={folder.id}>
-            {folder.name}
-          </option>
-        ))}
-      </select>
       {error && <p className="flow-error">{error}</p>}
       <button type="submit" className="flow-btn flow-btn-primary" disabled={saving || !name.trim()}>
         <Plus size={15} /> Create flowchart
+      </button>
+    </form>
+  );
+}
+
+export function NewFolderForm({
+  parentId,
+  parentName,
+  onCreated,
+}: {
+  parentId: number | null;
+  parentName: string | null;
+  onCreated: (entry: KnowledgeEntry) => void;
+}) {
+  const [name, setName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!name.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      onCreated(await api.createKnowledgeEntry({ name, parent_id: parentId }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create the folder');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="flow-form" onSubmit={submit}>
+      <p className="flow-form-context">{parentName ? `In ${parentName}` : 'At the top level'}</p>
+      <input className="flow-input" aria-label="Folder name" placeholder="Folder name" value={name} onChange={(event) => setName(event.target.value)} autoFocus />
+      {error && <p className="flow-error">{error}</p>}
+      <button type="submit" className="flow-btn flow-btn-primary" disabled={saving || !name.trim()}>
+        <Plus size={15} /> Create folder
       </button>
     </form>
   );

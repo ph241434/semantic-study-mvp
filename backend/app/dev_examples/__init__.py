@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from .. import models
 
 EXAMPLES_DIR = Path(__file__).parent
-EXAMPLE_FILES = ["dijkstra.json", "delivery.json"]
+EXAMPLE_FILES = ["dijkstra.json", "delivery.json", "burger_order.json"]
 
 
 def load_example_definitions() -> list[dict]:

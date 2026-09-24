@@ -80,6 +80,11 @@ function App() {
     window.history.pushState(next, '');
   }
 
+  /** A folder created from the flowchart sidebar is merged straight into the shared entries list — no refetch. */
+  function handleEntryCreated(entry: KnowledgeEntry) {
+    setEntries((current) => (current ? [...current, entry] : [entry]));
+  }
+
   if (error) {
     return <p className="proto-status proto-status-error">{error}</p>;
   }
@@ -97,6 +102,7 @@ function App() {
         onOpenConceptExplorer={(conceptId, name) =>
           navigate({ mode: 'graph', originFolderId: null, trail: [{ id: conceptId, name }] })
         }
+        onEntryCreated={handleEntryCreated}
       />
     );
   }

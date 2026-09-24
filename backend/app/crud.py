@@ -124,6 +124,27 @@ def list_knowledge_entries(db: Session) -> list[models.KnowledgeEntry]:
     )
 
 
+def _require_parent_folder(db: Session, parent_id: int | None) -> None:
+    """Mirrors flowchart_service._require_folder. Duplicated rather than imported: flowchart_service already
+    imports crud, so crud importing flowchart_service back would create a circular import."""
+    if parent_id is None:
+        return
+    entry = db.query(models.KnowledgeEntry).filter(models.KnowledgeEntry.id == parent_id).first()
+    if entry is None:
+        raise ValueError("parent_id does not exist")
+    if entry.entry_type != "folder":
+        raise ValueError("parent_id must refer to a folder")
+
+
+def create_knowledge_entry(db: Session, entry_in: schemas.KnowledgeEntryCreate) -> models.KnowledgeEntry:
+    _require_parent_folder(db, entry_in.parent_id)
+    entry = models.KnowledgeEntry(**entry_in.model_dump())
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
 def list_questions(db: Session) -> list[models.Question]:
     return db.query(models.Question).order_by(models.Question.created_at.desc()).all()
 

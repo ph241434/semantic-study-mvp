@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FlowNode, FlowchartDetail } from '../types';
@@ -46,9 +46,26 @@ vi.mock('@xyflow/react', async () => {
       return (
         <div data-testid="rf">
           {props.nodes.map((node: any) => (
-            <div key={node.id} data-testid={`node-${node.id}`} data-selected={String(Boolean(node.selected))} data-x={node.position.x} data-y={node.position.y}>
+            <div
+              key={node.id}
+              data-testid={`node-${node.id}`}
+              data-selected={String(Boolean(node.selected))}
+              data-x={node.position.x}
+              data-y={node.position.y}
+              data-editing={String(Boolean(node.data.editing))}
+            >
               {node.data.label}
               {node.data.hasChild ? ' [child]' : ''}
+              {node.data.editing && (
+                <>
+                  <button type="button" onClick={() => node.data.editing.onSave('Renamed')}>
+                    save rename {node.id}
+                  </button>
+                  <button type="button" onClick={() => node.data.editing.onCancel()}>
+                    cancel rename {node.id}
+                  </button>
+                </>
+              )}
             </div>
           ))}
           {props.edges.map((edge: any) => (
@@ -110,12 +127,15 @@ function baseProps(viewStates = createViewStateStore()) {
     layoutRevision: 0,
     selectedNodeId: null,
     selectedEdgeId: null,
+    editingNodeId: null,
     onSelectNode: noop,
     onSelectEdge: noop,
     onClearSelection: noop,
     onOpenDetail: noop,
     onNodeMoved: noop,
     onConnect: noop,
+    onRenameNode: noop,
+    onCancelEditNode: noop,
   };
 }
 
@@ -281,6 +301,23 @@ describe('FlowchartCanvas', () => {
     expect(screen.getByTestId('node-n1')).toHaveAttribute('data-selected', 'false');
     view.rerender(<FlowchartCanvas detail={parent} {...props} selectedNodeId={null} />);
     expect(screen.getByTestId('node-n2')).toHaveAttribute('data-selected', 'false');
+  });
+
+  it('marks only the editing node with `data.editing`, and routes save/cancel to the right callbacks with a numeric id', async () => {
+    const onRenameNode = vi.fn();
+    const onCancelEditNode = vi.fn();
+    render(<FlowchartCanvas detail={parent} {...baseProps()} editingNodeId={2} onRenameNode={onRenameNode} onCancelEditNode={onCancelEditNode} />);
+    await ready();
+
+    expect(screen.getByTestId('node-n1')).toHaveAttribute('data-editing', 'false');
+    expect(screen.getByTestId('node-n2')).toHaveAttribute('data-editing', 'true');
+    expect(screen.getByTestId('node-n3')).toHaveAttribute('data-editing', 'false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'save rename n2' }));
+    expect(onRenameNode).toHaveBeenCalledWith(2, 'Renamed');
+
+    fireEvent.click(screen.getByRole('button', { name: 'cancel rename n2' }));
+    expect(onCancelEditNode).toHaveBeenCalledTimes(1);
   });
 
   it('lays out again only for structural edits, keeping hand-placed nodes and the viewport', async () => {

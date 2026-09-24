@@ -4,6 +4,7 @@ import { memo, type CSSProperties } from 'react';
 
 import type { FlowRfNode } from './flowAdapter';
 import { nodeVisual, type NodeShape } from './flowStyles';
+import { NodeLabelEditor } from './NodeLabelEditor';
 
 // Outline points in a 0-100 box. The SVG is stretched to the node, so non-rectangular shapes need no custom sizing.
 const SHAPE_POINTS: Partial<Record<NodeShape, string>> = {
@@ -30,7 +31,7 @@ function FlowchartNodeView({ data, selected }: NodeProps<FlowRfNode>) {
           <polygon points={points} vectorEffect="non-scaling-stroke" />
         </svg>
       )}
-      <span className="flow-node-label">{data.label}</span>
+      <NodeLabelEditor label={data.label} editing={data.editing} className="flow-node-label" />
       {data.hasChild && (
         <span className="flow-node-child" title="Has a detailed flowchart (double-click to open)" data-testid="flow-node-child">
           <Layers className="flow-node-child-icon" aria-label="Has a detailed flowchart" />
